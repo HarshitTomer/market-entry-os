@@ -26,6 +26,27 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Usability (v1.3, 31 Oct 2026)
+
+Built for the question a buyer actually asks — "should we enter, who first,
+what do I say?" — not just for a report:
+
+- **Decision card** at the top of every report and the UI: GO / CONDITIONAL /
+  NO-GO with a stated rule, the top 5 accounts, and the risks that would
+  change the verdict. Caveats (e.g. semantic industry matching) are listed
+  but do not block a GO; blockers are too few accounts, no buyers, low
+  coverage, or no ACV.
+- **Guided brief builder** in the Streamlit sidebar (country / industry /
+  headcount / ACV / buyer roles) that emits a structured JSON brief, so an
+  unseen brief does not depend on free-text parsing. Free text is still
+  available.
+- **ACV scenario slider** in Market Intelligence: recomputes sizing from the
+  cached observed count — no new API call, no new credits.
+- **Why-now signals** per account (ICP match, growth, funding, hiring, buyer
+  mapped) in the CSV, report and UI, plus an **account-specific unsent
+  outreach draft** per account, built only from that account's observed
+  signals and the client's brief. Nothing is ever sent.
+
 ## Live-validated against the real Crustdata API (v1.2, 31 Oct 2026)
 
 The public docs and the live API differ, and v1.2 is fixed for the live

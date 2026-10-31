@@ -23,11 +23,11 @@ def _write_csv(path: Path, fieldnames: list[str], rows: list[dict]):
 
 
 def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
-                    sizing, evidence, warnings, mode, trace) -> list[str]:
+                    sizing, evidence, warnings, mode, trace, decision: dict | None = None) -> list[str]:
     _write_csv(out / "Target_Accounts.csv",
                ["rank", "name", "crustdata_company_id", "domain", "country",
                 "industry", "employee_count", "open_roles", "fit_score",
-                "coverage", "wave", "verification_status", "unknowns"],
+                "coverage", "wave", "verification_status", "signals", "unknowns"],
                [{"rank": r["rank"], "name": r["company"].name,
                  "crustdata_company_id": r["company"].company_id,
                  "domain": r["company"].domain or "unknown",
@@ -37,6 +37,7 @@ def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
                  "open_roles": r["company"].open_roles if r["company"].open_roles is not None else "unknown",
                  "fit_score": r["fit_score"], "coverage": r["coverage"],
                  "wave": r["wave"], "verification_status": r["verification_status"],
+                 "signals": "; ".join(r.get("signals", [])),
                  "unknowns": "; ".join(r["unknowns"])} for r in ranked])
 
     _write_csv(out / "Buyer_Map.csv",
@@ -81,12 +82,23 @@ def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
     elif mode == "no_key":
         mode_banner = ("<p style='background:#f8d7da;padding:10px'><b>NO LIVE DATA.</b> No Crustdata key was set, "
                        "so no live search ran. This packet is empty by design, not by fabrication.</p>")
+    decision_html = ""
+    if decision:
+        top5_html = "".join(f"<li>{html.escape(t['name'])} — fit {t['fit_score']}</li>" for t in decision["top5"])
+        risks_html = "".join(f"<li>{html.escape(r)}</li>" for r in decision["risks"]) or "<li>None listed</li>"
+        reasons_html = "".join(f"<li>{html.escape(r)}</li>" for r in decision["reasons"])
+        decision_html = (f"<div style='border:2px solid #333;padding:16px'>"
+                         f"<h2>Decision: {decision['verdict']} (confidence: {decision['confidence']})</h2>"
+                         f"<ul>{reasons_html}</ul><h3>Top 5 to contact first</h3><ol>{top5_html}</ol>"
+                         f"<h3>Risks / what would change this verdict</h3><ul>{risks_html}</ul>"
+                         f"<p><small>Rule: {html.escape(decision['rule'])}</small></p></div>")
     report = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Market Entry Report — {html.escape(brief.product_name)}</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px}}
 table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccc;padding:6px;text-align:left}}</style>
 </head><body>
 <h1>Market Entry Report: {html.escape(brief.product_name)}</h1>
+{decision_html}
 <p><b>Product:</b> {html.escape(brief.product_description[:300])}</p>
 <p><b>Target:</b> {html.escape(brief.target_industry or 'unknown')} in {html.escape(brief.target_country or 'unknown')},
 {brief.employee_min or '?'}–{brief.employee_max or '?'} employees. Mission: {mission_id}. Mode: {mode}.</p>
@@ -126,6 +138,10 @@ Sizing is an illustrative pool (observed count x client-supplied ACV), not valid
                            f"{brief.employee_min or '?'}–{brief.employee_max or '?'} employees. "
                            f"Mission: {mission_id}. Mode: {mode}.", styles["Normal"]),
                  Spacer(1, 6 * mm)]
+        if decision:
+            story.append(Paragraph(f"Decision: {decision['verdict']} (confidence: {decision['confidence']}). "
+                                   + " ".join(decision["reasons"]), styles["Normal"]))
+            story.append(Spacer(1, 6 * mm))
         if sizing["serviceable_annual_pool"] is not None:
             story.append(Paragraph(
                 f"Sizing: observed count {sizing['observed_eligible_company_count']} x "

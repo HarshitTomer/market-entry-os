@@ -200,9 +200,16 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         ranked.append({"company": c, "fit_score": score, "coverage": coverage,
                        "unknowns": unknowns, "verification_status": status})
     ranked.sort(key=lambda r: (-r["fit_score"], -r["coverage"]))
+    from .usability import build_draft, decision_card, signals_for
     for i, r in enumerate(ranked):
         r["rank"] = i + 1
         r["wave"] = wave_for(i, len(ranked))
+        c = r["company"]
+        industry_match = bool(c.industry and brief.target_industry.lower() in c.industry.lower())
+        r["signals"] = signals_for(c, buyer_count=buyer_counts.get(c.company_id, 0),
+                                   industry_match=industry_match)
+        buyers_here = [p for p in buyers if p.company_id == c.company_id or (p.company_domain and p.company_domain == c.domain)]
+        r["draft"] = build_draft(brief, c, r["signals"], buyers_here)
         c = r["company"]
         _evidence(evidence, c.company_id,
                   f"{c.name} employs {c.employee_count} people" if c.employee_count else f"{c.name} headcount unknown",
@@ -233,8 +240,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                          f"UNSENT DRAFT — do not send. Research {c.name} before outreach; evidence: fit {r['fit_score']}/100.")
         crm_mod.add_task(conn, mission_id, c.company_id, "outreach_draft",
                          f"Draft outreach to {c.name} ({r['wave']})",
-                         f"UNSENT DRAFT — do not send. Subject: market entry for {brief.product_name}. "
-                         f"Body: tailored to {c.name}'s observed profile; no claim beyond the evidence log.")
+                         r.get("draft", "UNSENT DRAFT — do not send."))
     for p in buyers:
         crm_mod.upsert_person(conn, mission_id, p, verified=bool(p.company_domain))
     for e in evidence:
@@ -247,11 +253,13 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     conn.close()
 
     warnings = list(dict.fromkeys(warnings))  # competitor step re-adds the same industry/sizing notes
-    artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace)
     verified = sum(1 for e in evidence if e["status"] == "supported")
+    verified_fraction = round(verified / len(evidence), 3) if evidence else None
+    decision = decision_card(ranked, len(buyers), sizing, verified_fraction, warnings)
+    artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace, decision=decision)
     result = {
         "mission_id": mission_id, "state": state, "mode": mode,
-        "brief": brief.to_dict(), "sizing": sizing,
+        "brief": brief.to_dict(), "sizing": sizing, "decision": decision,
         "company_records": len(ranked), "buyer_records": len(buyers),
         "competitor_records": len(competitors),
         "verified_claim_fraction": round(verified / len(evidence), 3) if evidence else None,
@@ -262,6 +270,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         "ranked": [{"rank": r["rank"], "name": r["company"].name, "domain": r["company"].domain,
                     "fit_score": r["fit_score"], "coverage": r["coverage"],
                     "wave": r["wave"], "verification_status": r["verification_status"],
+                    "signals": r.get("signals", []), "draft": r.get("draft", ""),
                     "unknowns": r["unknowns"]} for r in ranked],
     }
     (out / "mission_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
