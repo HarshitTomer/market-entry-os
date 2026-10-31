@@ -26,6 +26,25 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Interface, polished + delete (v1.9, 31 Oct 2026)
+
+- **Look:** tighter typography and spacing, a light-grey sidebar
+  with left-aligned recent chats, pill buttons, a rounded search box
+  with a soft shadow, verdict and metric cards with borders, and
+  Streamlit's own toolbar/menu hidden — so it reads like a product,
+  not a default Streamlit demo.
+- **User-friendly touches:** a visible "↩ New search" button on
+  results (not only in the sidebar), three one-tap example searches
+  on the landing page, and a single primary action (Download report).
+- **Delete research, for real:** "🗑 Delete this research" on a
+  result, or "Manage past searches" in the sidebar, asks once —
+  "Delete permanently?" — and on confirmation deletes the mission's
+  report, CSVs, CRM database *and* its history entry. A safety guard
+  only allows deleting a folder under `outputs/` that contains that
+  mission's `mission_result.json`, so a wrong path can never wipe
+  an unrelated directory. The old "Remove" only removed the list
+  entry; delete is now the real thing.
+
 ## Interface, refined (v1.8, 31 Oct 2026)
 
 Chat-style, not form-style. One search box, nothing else to fill

@@ -68,3 +68,27 @@ def remove_entry(out_dir: str | Path, mission_id: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def delete_mission(out_dir: str | Path, mission_id: str) -> bool:
+    """Permanently delete a research mission: its output folder AND its
+    history entry. Safety guard: only delete a folder that actually
+    contains that mission's mission_result.json and sits under an
+    outputs/ directory, so a wrong path can never wipe an unrelated dir.
+    Returns False (and deletes nothing) if the guard fails."""
+    try:
+        folder = Path(out_dir).resolve()
+        if "outputs" not in folder.parts:
+            return False
+        result_path = folder / "mission_result.json"
+        if not result_path.exists():
+            return False
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        if data.get("mission_id") != mission_id:
+            return False
+        import shutil
+        shutil.rmtree(folder)
+        remove_entry(out_dir, mission_id)
+        return True
+    except Exception:
+        return False
