@@ -61,6 +61,11 @@ st.markdown("""
   .stButton button {border-radius: 999px;}
   [data-testid="stMetric"] {background: #ffffff; border: 1px solid #e5e7eb;
     border-radius: 16px; padding: 14px 16px;}
+  [data-testid="stProgress"] > div > div {background-color: #111827;}
+  .step-done {color: #111827; font-weight: 600;}
+  .step-now {color: #111827; font-weight: 700; text-decoration: underline;
+    text-underline-offset: 4px;}
+  .step-next {color: #9ca3af;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,6 +102,44 @@ def _open_history_entry(entry: dict) -> bool:
     st.session_state["out"] = entry["out_dir"]
     st.session_state["brief_text"] = entry.get("brief_text", "")
     return True
+
+
+_STAGES = ["Understanding your market", "Finding companies in this market",
+           "Checking companies in detail", "Comparing competitors",
+           "Finding the right people", "Ranking your market and sizing it",
+           "Building your report"]
+
+
+def _run_with_progress(brief_text: str) -> dict:
+    """Clean, visual progress: a card, a bar, and plain stage names.
+    No tool names, no API names, no logs, no background logic — just
+    what a founder would care to know: where the research is up to."""
+    with st.container(border=True):
+        st.markdown("**Researching your market**")
+        bar = st.progress(0)
+        steps = st.empty()
+        stage = st.empty()
+
+        def _cb(frac: float, label: str):
+            bar.progress(min(1.0, max(0.0, frac)))
+            # Strip the "(n of m)" detail for the step row; the bar shows progress.
+            base = label.split(" (")[0]
+            now = _STAGES.index(base) if base in _STAGES else len(_STAGES) - 1
+            if label.startswith("Done"):
+                row = " · ".join(f'<span class="step-done">{s} ✓</span>' for s in _STAGES)
+            else:
+                parts = []
+                for i, s in enumerate(_STAGES):
+                    cls = "step-done" if i < now else ("step-now" if i == now else "step-next")
+                    parts.append(f'<span class="{cls}">{s}</span>')
+                row = " → ".join(parts)
+            steps.markdown(row, unsafe_allow_html=True)
+            stage.markdown(f"<p class='muted'>{html.escape(label)}</p>", unsafe_allow_html=True)
+
+        return run_mission(brief_text, "outputs/streamlit-mission",
+                           api_key=os.environ.get("CRUSTDATA_API_KEY"),
+                           sample=st.session_state.get("sample_mode", False),
+                           progress=_cb)
 
 
 def _display_brief(result: dict, brief_text: str) -> str:
@@ -206,10 +249,7 @@ if result:
     with _top2:
         if st.button("↻  Run again", use_container_width=True,
                      help="Re-run the same brief with fresh live data."):
-            with st.spinner("Researching…"):
-                _fresh = run_mission(brief_text, "outputs/streamlit-mission",
-                                     api_key=os.environ.get("CRUSTDATA_API_KEY"),
-                                     sample=st.session_state.get("sample_mode", False))
+            _fresh = _run_with_progress(brief_text)
             st.session_state["result"] = _fresh
             st.session_state["out"] = "outputs/streamlit-mission"
             st.rerun()
@@ -337,10 +377,7 @@ if run:
     if not brief:
         st.error("Describe what you're selling and where you want to sell it, then run again.")
         st.stop()
-    with st.spinner("Researching…"):
-        result = run_mission(brief, "outputs/streamlit-mission",
-                             api_key=os.environ.get("CRUSTDATA_API_KEY"),
-                             sample=st.session_state.get("sample_mode", False))
+    result = _run_with_progress(brief)
     st.session_state["result"] = result
     st.session_state["out"] = "outputs/streamlit-mission"
     st.session_state["brief_text"] = brief

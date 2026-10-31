@@ -66,3 +66,14 @@ def test_sample_mission_end_to_end(tmp_path):
     # Idempotence: re-run into the same mission output dir structure is a
     # new mission; CRM upserts within one mission never duplicate.
     assert "SAMPLE" in (tmp_path / "Market_Entry_Report.html").read_text() or True
+
+
+def test_progress_callback_uses_plain_labels_only(tmp_path):
+    seen = []
+    run_mission(BRIEF, tmp_path / "m2", sample=True,
+                progress=lambda f, label: seen.append((f, label)))
+    assert seen and seen[-1][0] == 1.0
+    assert all(0.0 <= f <= 1.0 for f, _ in seen)
+    # No background logic leaks into the frontend labels.
+    banned = ("crustdata", "api", "enrich", "scoring", "crm", "tool", "search_companies")
+    assert all(not any(b in label.lower() for b in banned) for _, label in seen)

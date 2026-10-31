@@ -54,10 +54,23 @@ SAMPLE_COMPANIES = [
 
 
 def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None,
-                sample: bool = False, max_accounts: int | None = None) -> dict:
+                sample: bool = False, max_accounts: int | None = None,
+                progress=None) -> dict:
+    """progress, if given, is called as progress(fraction, label) with
+    plain, user-facing stage labels only — never tool names, API names,
+    or internal step codes. A failing callback must never break a mission."""
+    def _p(frac: float, label: str):
+        if progress is None:
+            return
+        try:
+            progress(min(1.0, max(0.0, frac)), label)
+        except Exception:
+            pass
+
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     mission_id = f"mission_{uuid.uuid4().hex[:8]}"
+    _p(0.05, "Understanding your market")
     brief: MarketBrief = parse_brief(raw_prompt)
     if max_accounts:
         brief.max_target_accounts = max_accounts
@@ -75,6 +88,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
             "for a clearly labelled smoke test.")
 
     # Step B: discovery
+    _p(0.15, "Finding companies in this market")
     if sample:
         from .crustdata import normalize_company
         companies = [normalize_company(r) for r in SAMPLE_COMPANIES]
@@ -90,8 +104,13 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     companies = companies[:brief.max_target_accounts]
 
     # Step C: enrich top accounts (bounded by credit cap)
+    _p(0.35, "Checking companies in detail")
     enriched: list[Company] = []
-    for c in companies[:brief.max_company_enrichments]:
+    _to_check = companies[:brief.max_company_enrichments]
+    for _i, c in enumerate(_to_check):
+        if _to_check:
+            _p(0.35 + 0.20 * (_i + 1) / len(_to_check),
+               f"Checking companies in detail ({_i + 1} of {len(_to_check)})")
         if sample:
             enriched.append(c)
             continue
@@ -123,6 +142,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         enriched = kept_enriched
 
     # Step D: competitors (keyword company search + web search, best effort)
+    _p(0.60, "Comparing competitors")
     competitors: list[dict] = []
     if mode == "live" and brief.competitor_keywords:
         kw = brief.competitor_keywords[0]
@@ -175,6 +195,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     # Step E: buyers for top 5 accounts. buyer_counts counts
     # role-verified buyers only; contacts with unverified roles are kept
     # in Buyer_Map as contacts, not scored as buyers.
+    _p(0.70, "Finding the right people")
     buyers: list[Person] = []
     buyer_counts: dict[str, int] = {}
     for c in enriched[:5]:
@@ -231,6 +252,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
             buyers[:len(enriched_buyers)] = enriched_buyers
 
     # Step C (scoring, after buyers so buyer availability counts)
+    _p(0.85, "Ranking your market and sizing it")
     ranked = []
     for c in enriched:
         desc = (c.description or "").lower()
@@ -273,6 +295,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         state = "completed_with_warnings"
 
     # Step H: CRM + exports (SQLite is the operational state)
+    _p(0.95, "Building your report")
     db_path = out / "marketentry.db"
     conn = crm_mod.connect(db_path)
     conn.execute("INSERT OR REPLACE INTO missions(id, raw_prompt, normalized_brief_json, status, started_at, finished_at, warnings_json) VALUES(?,?,?,?,?,?,?)",
@@ -305,6 +328,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     decision = decision_card(ranked, len(buyers), sizing, verified_fraction, warnings,
                              role_verified_count=role_buyer_total if brief.target_buyer_roles else None)
     artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace, decision=decision)
+    _p(1.0, "Done — here's your answer")
     result = {
         "mission_id": mission_id, "state": state, "mode": mode,
         "brief": brief.to_dict(), "sizing": sizing, "decision": decision,

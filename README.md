@@ -26,6 +26,19 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Visual progress, no background logic (v1.11, 31 Oct 2026)
+
+The old spinner ("Researching…") told you nothing for 90 seconds.
+Now a bordered card shows, live: a dark progress bar, the current
+stage in plain words, and a step row that fills in as it goes —
+Understanding your market → Finding companies → Checking companies
+→ Comparing competitors → Finding the right people → Ranking and
+sizing → Building your report → Done. No tool names, no API names,
+no logs, no "enriching" or "scoring" — the mission calls a progress
+callback at each stage, and a test asserts no banned background
+word can leak into a frontend label. Same card for Run and Run
+again.
+
 ## UI bug fixes + functionality (v1.10, 31 Oct 2026)
 
 - **Bugs fixed:** reopening an old guided-builder mission no longer
