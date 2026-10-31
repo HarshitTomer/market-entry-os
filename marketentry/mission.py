@@ -323,4 +323,10 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                     "unknowns": r["unknowns"]} for r in ranked],
     }
     (out / "mission_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    # History: never breaks the mission if the history file is unavailable.
+    try:
+        from .history import record_mission
+        record_mission(out, raw_prompt, result)
+    except Exception:
+        pass
     return result

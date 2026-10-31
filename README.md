@@ -26,6 +26,18 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## History (v1.7, 31 Oct 2026)
+
+Every mission — CLI, API, or UI — is recorded in
+`outputs/history.json` (local only, gitignored, never committed):
+mission, date, mode, product, country, industry, verdict, account /
+buyer / competitor counts, and serviceable pool. The front page has a
+"Past searches" expander and results have a History tab: search past
+queries by text, reopen any mission from its saved result (no new API
+calls, no new credits), or remove it from the list (files are left
+alone). If a mission's output folder was deleted, reopening says so
+plainly instead of showing stale data.
+
 ## Interactive results (v1.6, 31 Oct 2026)
 
 The front page stays a clean search box. After a run, the results are

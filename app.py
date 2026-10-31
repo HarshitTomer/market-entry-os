@@ -22,6 +22,7 @@ try:
 except Exception:
     pass
 
+from marketentry.history import load_history, remove_entry
 from marketentry.mission import run_mission
 
 st.set_page_config(page_title="MarketEntryOS", layout="centered")
@@ -75,6 +76,50 @@ def _read_csv(path: Path):
 def _verdict_pill(verdict: str) -> str:
     cls = {"GO": "pill-go", "CONDITIONAL": "pill-conditional"}.get(verdict, "pill-nogo")
     return f'<span class="pill {cls}">{verdict}</span>'
+
+
+def _open_history_entry(entry: dict) -> bool:
+    """Load a past mission's saved result into the current session."""
+    result_path = Path(entry["out_dir"]) / "mission_result.json"
+    if not result_path.exists():
+        return False
+    st.session_state["result"] = json.loads(result_path.read_text(encoding="utf-8"))
+    st.session_state["out"] = entry["out_dir"]
+    st.session_state["brief_text"] = entry.get("brief_text", "")
+    return True
+
+
+def _history_section(base_dir: str, title: str):
+    """Searchable history list with Open / Remove per entry."""
+    entries = load_history(base_dir)
+    if not entries:
+        st.caption("No past searches yet. Run a search and it will appear here.")
+        return
+    total_accounts = sum(e.get("company_records", 0) for e in entries)
+    st.caption(f"{len(entries)} past searches · {total_accounts} accounts found in total")
+    query = st.text_input("Search past searches", placeholder="e.g. fintech, Germany, compliance…",
+                          key=f"history_search_{title}")
+    shown = [e for e in entries
+             if not query or query.lower() in json.dumps(e).lower()][:20]
+    for e in shown:
+        col_t, col_o, col_r = st.columns([5, 1, 1])
+        with col_t:
+            pool = e.get("serviceable_annual_pool")
+            pool_txt = f" — {e.get('currency', '')} {pool:,.0f}" if pool else ""
+            st.write(f"**{e.get('product_name') or 'Market entry'}** — "
+                     f"{e.get('target_industry', '')} in {e.get('target_country', '')} · "
+                     f"{e.get('verdict', '')} · {e.get('company_records', 0)} accounts{pool_txt} · "
+                     f"{e.get('created_at_utc', '')[:10]} · {e.get('mode', '')}")
+        with col_o:
+            if st.button("Open", key=f"open_{e['mission_id']}_{title}"):
+                if _open_history_entry(e):
+                    st.rerun()
+                else:
+                    st.error("That mission's output folder is gone, so it can't be reopened.")
+        with col_r:
+            if st.button("Remove", key=f"remove_{e['mission_id']}_{title}"):
+                remove_entry(base_dir, e["mission_id"])
+                st.rerun()
 
 
 # ---------------------------------------------------------------- results
@@ -141,8 +186,8 @@ if result:
         else:
             st.caption("Tick the gaps above to see how the verdict would move. Nothing is re-verified by ticking a box.")
 
-    tab_overview, tab_accounts, tab_people, tab_files = st.tabs(
-        ["Overview", "Accounts", "People & competitors", "Files & CRM"])
+    tab_overview, tab_accounts, tab_people, tab_files, tab_history = st.tabs(
+        ["Overview", "Accounts", "People & competitors", "Files & CRM", "History"])
 
     with tab_overview:
         s = result["sizing"]
@@ -278,6 +323,12 @@ if result:
                 use_container_width=True, hide_index=True)
             conn.close()
 
+    with tab_history:
+        st.markdown("### Past searches")
+        st.caption("Reopen any past mission without spending new API credits. "
+                   "Removing an entry only removes it from this list, not its files.")
+        _history_section(st.session_state["out"], "results")
+
     st.markdown('<p class="muted">Research only. No prospect has been contacted. '
                 'Outreach drafts are unsent and need human approval before any use.</p>',
                 unsafe_allow_html=True)
@@ -324,6 +375,9 @@ with st.expander("Refine — country, industry, size, price, buyers"):
                 unsafe_allow_html=True)
 if "sample" not in locals():
     sample = False
+
+with st.expander("Past searches"):
+    _history_section("outputs/streamlit-mission", "landing")
 
 _, mid, _ = st.columns([1, 1, 1])
 with mid:
