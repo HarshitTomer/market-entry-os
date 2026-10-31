@@ -277,7 +277,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                        "unknowns": unknowns, "verification_status": status,
                        "breakdown": breakdown})
     ranked.sort(key=lambda r: (-r["fit_score"], -r["coverage"]))
-    from .usability import build_draft, decision_card, signals_for
+    from .usability import build_draft, build_insights, decision_card, signals_for
     for i, r in enumerate(ranked):
         r["rank"] = i + 1
         r["wave"] = wave_for(i, len(ranked))
@@ -336,11 +336,13 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     role_buyer_total = sum(buyer_counts.values())
     decision = decision_card(ranked, len(buyers), sizing, verified_fraction, warnings,
                              role_verified_count=role_buyer_total if brief.target_buyer_roles else None)
-    artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace, decision=decision)
+    insights = build_insights(ranked, buyers, competitors, sizing, brief, decision)
+    artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace, decision=decision, insights=insights)
     _p(1.0, "Done — here's your answer")
     result = {
         "mission_id": mission_id, "state": state, "mode": mode,
         "brief": brief.to_dict(), "sizing": sizing, "decision": decision,
+        "insights": insights,
         "company_records": len(ranked), "buyer_records": len(buyers),
         "competitor_records": len(competitors),
         "verified_claim_fraction": round(verified / len(evidence), 3) if evidence else None,

@@ -23,7 +23,8 @@ def _write_csv(path: Path, fieldnames: list[str], rows: list[dict]):
 
 
 def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
-                    sizing, evidence, warnings, mode, trace, decision: dict | None = None) -> list[str]:
+                    sizing, evidence, warnings, mode, trace, decision: dict | None = None,
+                    insights: list[dict] | None = None) -> list[str]:
     ev_by_company: dict[str, list[str]] = {}
     for e in evidence:
         ev_by_company.setdefault(str(e["subject_id"]), []).append(e["evidence_id"])
@@ -143,6 +144,8 @@ a{{color:#a5b4fc}}</style>
 {decision_html}
 <div class='card'><h2>What you're selling</h2>
 <p>{html.escape(brief.product_description[:300])}</p></div>
+<h2>Insights — not just a list</h2>
+{''.join(f"<div class='card'><h3>{html.escape(i['title'])}</h3><p>{html.escape(i['body'])}</p></div>" for i in (insights or []))}
 {mode_banner}
 <div class='card'><h2>Bottom-up market sizing</h2>{sizing_html}</div>
 <h2>Ranked target accounts</h2>
@@ -190,6 +193,9 @@ Sizing is an illustrative pool (observed count x client-supplied ACV), not valid
             story.append(Paragraph(f"Decision: {decision['verdict']} (confidence: {decision['confidence']}). "
                                    + " ".join(decision["reasons"]), styles["Normal"]))
             story.append(Spacer(1, 6 * mm))
+        for _ins in (insights or []):
+            story.append(Paragraph(f"<b>{html.escape(_ins['title'])}:</b> {html.escape(_ins['body'])}", styles["Normal"]))
+            story.append(Spacer(1, 3 * mm))
         if sizing["serviceable_annual_pool"] is not None:
             story.append(Paragraph(
                 f"Sizing: observed count {sizing['observed_eligible_company_count']} x "

@@ -63,6 +63,118 @@ def build_draft(brief, company, signals: list[str], buyers_for_company: list) ->
     return "\n".join(lines)
 
 
+def build_insights(ranked: list[dict], buyers: list, competitors: list,
+                   sizing: dict, brief, decision: dict) -> list[dict]:
+    """The answer founders actually need — not a list, but why this
+    market, why now, why these accounts, and what to do first.
+    Every sentence is computed from observed fields. If a field is
+    missing, the insight says so instead of inventing a trend."""
+    insights: list[dict] = []
+    n = len(ranked)
+    if not n:
+        return [{"title": "No market to judge yet",
+                 "body": "No accounts matched this brief in the data available, so no "
+                         "market insight can be drawn. Widen the size range or "
+                         "the geography before drawing a conclusion — an empty "
+                         "result is not proof that the market does not exist."}]
+    fits = [r["fit_score"] for r in ranked]
+    avg_fit = sum(fits) / n
+    top = ranked[0]
+    top_company = top["company"]
+    # 1. Why this market is worth entering (or not).
+    if sizing.get("serviceable_annual_pool") is not None:
+        body = (f"There are {sizing['observed_eligible_company_count']} companies in the "
+                f"observed universe in this size range, worth "
+                f"{sizing['currency']} {sizing['serviceable_annual_pool']:,.0f} a year at "
+                f"your {sizing['currency']} {sizing['annual_contract_value']:,.0f} price — "
+                f"that is the size of the pond, not a forecast. The shortlist alone "
+                f"is {sizing['currency']} {sizing['shortlist_pipeline_pool']:,.0f} of pipeline. "
+                f"That makes this a market you can actually work through account by "
+                f"account, rather than a market you have to guess at.")
+    else:
+        body = (f"There are {n} ranked accounts in this size range, but without a "
+                f"price in the brief no money figure can be put on the market — "
+                f"and none has been invented. Add a contract value and the same "
+                f"universe gives you a pool in one line.")
+    insights.append({"title": "Why this market is worth a look", "body": body})
+    # 2. Why now — only from observed signals.
+    funded = [r for r in ranked if r["company"].funding_usd]
+    growing = [r for r in ranked if r["company"].headcount_growth and r["company"].headcount_growth > 0]
+    hiring = [r for r in ranked if r["company"].open_roles]
+    signals = []
+    if funded:
+        total_funding = sum(r["company"].funding_usd for r in funded)
+        signals.append(f"{len(funded)} of the {n} shortlisted companies have recorded funding "
+                       f"(${total_funding:,.0f} in total) — funded companies have budget to spend, "
+                       f"and they are the ones to approach first")
+    if growing:
+        signals.append(f"{len(growing)} are growing headcount, which usually means new systems "
+                       f"are being bought, not just renewed")
+    if hiring:
+        signals.append(f"{len(hiring)} have open roles listed right now")
+    if signals:
+        insights.append({"title": "Why now", "body": ". ".join(signals) + "."})
+    else:
+        insights.append({"title": "Why now — honestly, no signal found",
+                         "body": "No funding, growth or hiring signal was observed for these "
+                                 "accounts in the data available. That does not mean the timing "
+                                 "is bad — it means timing cannot be used as the reason to enter. "
+                                 "Enter on fit and on the pool size, and validate timing in the "
+                                 "first conversations, not from this packet."})
+    # 3. Why these accounts first, in plain words.
+    wave1 = [r for r in ranked if r["wave"] == "Wave 1"]
+    insights.append({"title": "Why these accounts first",
+                     "body": (f"{top_company.name} leads at fit {top['fit_score']}/100 "
+                              f"(average across the shortlist is {avg_fit:.0f}), and "
+                              f"{len(wave1)} accounts sit in Wave 1 — the ones with the best "
+                              f"combination of size, industry match and evidence. Starting "
+                              f"anywhere else means starting with weaker evidence and a "
+                              f"weaker reason to be believed in the first email.")})
+    # 4. What is actually in the way.
+    verified = [p for p in buyers if getattr(p, "role_verified", False)]
+    if verified:
+        insights.append({"title": "What is already in your favour",
+                         "body": (f"{len(verified)} role-verified buyers are already mapped, "
+                                  f"so outreach does not start with 'who do we talk to?' — "
+                                  f"it starts with a named person in a matching role.")})
+    else:
+        insights.append({"title": "What is actually in the way",
+                         "body": ("No role-verified buyer was found for the top accounts in "
+                                  "the data available — only senior contacts, labelled as "
+                                  "such. That is the single biggest gap in this packet: "
+                                  "without a named compliance or security buyer, the first "
+                                  "move is not a pitch, it is finding that person. "
+                                  "Treating a senior contact as a buyer would be the "
+                                  "mistake this packet is built to avoid.")})
+    # 5. Competition, in one honest paragraph.
+    confirmed = [c for c in competitors if c.get("classification") == "confirmed competitor"]
+    if confirmed:
+        insights.append({"title": "What you are up against",
+                         "body": (f"{len(confirmed)} competitors are confirmed in this market "
+                                  f"by an observed industry match, out of {len(competitors)} "
+                                  f"mapped. That is not a reason to stay out — it is proof "
+                                  f"buyers already pay for this kind of product. Your edge "
+                                  f"has to be a sharper fit for the Wave 1 accounts, not "
+                                  f"a claim that the market is empty.")})
+    elif competitors:
+        insights.append({"title": "What you are up against",
+                         "body": (f"{len(competitors)} possible competitors were mapped, but "
+                                  f"none could be confirmed from the evidence available. "
+                                  f"Do not pitch as if the market is empty, and do not "
+                                  f"pitch as if it is crowded — pitch on fit for the "
+                                  f"specific account.")})
+    # 6. The next three moves, with reasons.
+    insights.append({"title": "What to do first, in order",
+                     "body": ("1. Talk to the Wave 1 accounts first — they are the cheapest "
+                              "proof that the fit score means anything in a real conversation. "
+                              "2. Before any pitch, resolve the buyer gap above — one verified "
+                              "buyer per Wave 1 account changes this from a list into a pipeline. "
+                              "3. Use the first two conversations to test the one claim this "
+                              "packet cannot prove: that these companies will actually pay "
+                              "for this product now, not just that they look like they should.")})
+    return insights
+
+
 def decision_card(ranked: list[dict], buyer_count: int, sizing: dict,
                   verified_fraction: float | None, warnings: list[str],
                   role_verified_count: int | None = None) -> dict:

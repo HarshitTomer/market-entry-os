@@ -26,6 +26,20 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Insights, not just a list (v1.17, 31 Oct 2026)
+
+Founders do not need another table — they need to know why this
+market, why now, and what to do first. Every result now opens with
+insight cards, computed from observed fields only, before any
+account list: why the market is worth a look (pool size, not a
+forecast), why now (funding / growth / hiring signals actually
+observed — or an honest "no signal found"), why these accounts
+first, what is actually in the way (usually: no role-verified
+buyer), what you are up against, and what to do first in order.
+The same insights are in the HTML report (right after the decision)
+and in the PDF, and in mission_result.json for the API. No trend,
+figure or buyer is invented to make the story sound better.
+
 ## More professional chrome + loading states (v1.16, 31 Oct 2026)
 
 - **Chrome:** every view now has a top bar — MarketEntryOS wordmark

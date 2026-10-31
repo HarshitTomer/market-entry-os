@@ -415,6 +415,12 @@ if result:
               if s["serviceable_annual_pool"] is not None else "—")
     c3.metric("People mapped", result["buyer_records"])
 
+    if result.get("insights"):
+        st.markdown("### Why this market — the insight, not just the list")
+        for _ins in result["insights"]:
+            with st.container(border=True):
+                st.markdown(f"**{_ins['title']}**")
+                st.write(_ins["body"])
     st.markdown("### Start with these")
     for t in (d.get("top5") or [])[:5]:
         st.write(f"{t['rank']}. **{t['name']}** — fit {t['fit_score']}")

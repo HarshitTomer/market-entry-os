@@ -68,6 +68,19 @@ def test_sample_mission_end_to_end(tmp_path):
     assert "SAMPLE" in (tmp_path / "Market_Entry_Report.html").read_text() or True
 
 
+def test_insights_explain_why_not_just_list(tmp_path):
+    result = run_mission(BRIEF, tmp_path / "ins", sample=True)
+    titles = [i["title"] for i in result["insights"]]
+    assert "Why this market is worth a look" in titles
+    assert "What to do first, in order" in titles
+    # No invented money or trends: the pool figure must match sizing exactly.
+    body = " ".join(i["body"] for i in result["insights"])
+    assert f"{result['sizing']['serviceable_annual_pool']:,.0f}" in body
+    html_report = (tmp_path / "ins" / "Market_Entry_Report.html").read_text()
+    assert "Insights — not just a list" in html_report
+    assert "Why this market is worth a look" in html_report
+
+
 def test_report_is_dark_and_includes_people_and_competitors(tmp_path):
     result = run_mission(BRIEF, tmp_path / "rep", sample=True)
     html_report = (tmp_path / "rep" / "Market_Entry_Report.html").read_text()
