@@ -80,6 +80,11 @@ st.markdown("""
   .step-now {color: #a5b4fc; font-weight: 700; text-decoration: underline;
     text-underline-offset: 4px;}
   .step-next {color: #64748b;}
+  @keyframes pulse-dot {0%, 100% {opacity: 0.25;} 50% {opacity: 1;}}
+  .loader-dot {display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #a5b4fc; margin-right: 6px; animation: pulse-dot 1.2s infinite;}
+  .loader-dot:nth-child(2) {animation-delay: 0.2s;}
+  .loader-dot:nth-child(3) {animation-delay: 0.4s;}
   /* Bordered cards (verdict, progress, delete confirm): one muted line,
      consistent radius and padding, no double borders. */
   [data-testid="stVerticalBlockBorderWrapper"] {border-color: #334155 !important;
@@ -155,8 +160,15 @@ def _run_with_progress(brief_text: str) -> tuple[dict, str]:
     """Clean, visual progress: a card, a bar, and plain stage names.
     No tool names, no API names, no logs, no background logic — just
     what a founder would care to know: where the research is up to."""
+    import time as _time
+    _started = _time.time()
     with st.container(border=True):
-        st.markdown("**Researching your market**")
+        st.markdown('<span class="loader-dot"></span><span class="loader-dot"></span>'
+                    '<span class="loader-dot"></span> **Researching your market**',
+                    unsafe_allow_html=True)
+        st.markdown("<p class='muted'>A live run usually takes about 90 seconds — "
+                    "the bar moves at every company, competitor and person checked, "
+                    "so a pause is work happening, not a freeze.</p>", unsafe_allow_html=True)
         bar = st.progress(0)
         steps = st.empty()
         stage = st.empty()
@@ -175,7 +187,9 @@ def _run_with_progress(brief_text: str) -> tuple[dict, str]:
                     parts.append(f'<span class="{cls}">{s}</span>')
                 row = " → ".join(parts)
             steps.markdown(row, unsafe_allow_html=True)
-            stage.markdown(f"<p class='muted'>{html.escape(label)}</p>", unsafe_allow_html=True)
+            _elapsed = int(_time.time() - _started)
+            stage.markdown(f"<p class='muted'>{html.escape(label)} · {_elapsed}s elapsed</p>",
+                           unsafe_allow_html=True)
 
         _out_dir = _new_mission_dir()
         _result = run_mission(brief_text, _out_dir,

@@ -178,6 +178,9 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     if mode == "live":
         import time as _time2
         for _ci, comp in enumerate(competitors):
+            if competitors:
+                _p(0.60 + 0.10 * (_ci + 1) / len(competitors),
+                   f"Comparing competitors ({_ci + 1} of {len(competitors)})")
             if not comp.get("domain"):
                 continue
             if _ci:
@@ -198,7 +201,11 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     _p(0.70, "Finding the right people")
     buyers: list[Person] = []
     buyer_counts: dict[str, int] = {}
-    for c in enriched[:5]:
+    _buyer_targets = enriched[:5]
+    for _bi, c in enumerate(_buyer_targets):
+        if _buyer_targets:
+            _p(0.70 + 0.12 * (_bi + 1) / len(_buyer_targets),
+               f"Finding the right people ({_bi + 1} of {len(_buyer_targets)})")
         if sample:
             p = Person(person_id=f"sample-{c.company_id}", name="Sample Buyer",
                        title="Head of Compliance", company_name=c.name,
@@ -237,6 +244,8 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         import time as _time3
         enriched_buyers: list[Person] = []
         for _pi, p in enumerate(buyers[:3]):
+            _p(0.82 + 0.03 * (_pi + 1) / max(1, len(buyers[:3])),
+               "Finding the right people")
             if _pi:
                 _time3.sleep(1.0)
             got = client.enrich_person(p)

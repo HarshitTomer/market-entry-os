@@ -26,6 +26,17 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Better loading (v1.14, 31 Oct 2026)
+
+The old progress bar stalled during the long loops — it only moved
+at stage boundaries, so a 2-second-spaced check looked frozen. Now
+it moves at every item: every company checked, every competitor
+compared, every account's people found. The card also shows elapsed
+seconds, says up front that a live run usually takes about 90
+seconds (so a pause reads as work, not a freeze), and has three
+pulsing dots so you can see at a glance that it is still alive.
+Still no tool/API/log names — only plain stage labels.
+
 ## Dark UI, fixed alignment and borders (v1.13, 31 Oct 2026)
 
 The all-white theme was blinding, so the whole UI is now dark by
