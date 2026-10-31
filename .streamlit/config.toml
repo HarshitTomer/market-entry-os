@@ -1,8 +1,8 @@
 [theme]
-# One restrained accent everywhere (primary buttons, progress bar, links),
-# instead of Streamlit's default red. Everything else is neutral grey.
-primaryColor = "#4f46e5"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f9fafb"
-textColor = "#111827"
+# Dark by default — the previous all-white theme was blinding.
+# Soft slate surfaces, muted text, one restrained indigo accent.
+primaryColor = "#818cf8"
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#e2e8f0"
 font = "sans serif"

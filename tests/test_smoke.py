@@ -68,10 +68,14 @@ def test_sample_mission_end_to_end(tmp_path):
     assert "SAMPLE" in (tmp_path / "Market_Entry_Report.html").read_text() or True
 
 
-def test_theme_is_single_neutral_accent():
+def test_theme_is_dark_not_blinding_white():
     theme = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text()
-    assert 'primaryColor = "#4f46e5"' in theme
-    assert "#ff4b4b" not in theme
+    assert 'primaryColor = "#818cf8"' in theme
+    assert 'backgroundColor = "#0f172a"' in theme
+    assert "#ffffff" not in theme and "#ff4b4b" not in theme
+    app = (Path(__file__).resolve().parents[1] / "app.py").read_text()
+    # No pure-white surfaces left in the custom CSS.
+    assert "#ffffff" not in app.split("st.markdown(\"\"\"")[1].split("\"\"\"")[0]
 
 
 def test_progress_callback_uses_plain_labels_only(tmp_path):

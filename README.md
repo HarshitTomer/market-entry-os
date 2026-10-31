@@ -26,6 +26,20 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Dark UI, fixed alignment and borders (v1.13, 31 Oct 2026)
+
+The all-white theme was blinding, so the whole UI is now dark by
+default: slate-900 background, slate-800 surfaces, soft off-white
+text, muted slate borders — no pure white anywhere, verified by a
+test. One indigo accent (softened for dark) for primary buttons,
+progress and links. Alignment and borders were cleaned up at the
+same time: sidebar buttons are a consistent 42px with a visible
+hover border, the main column is centred at 760px, metric cards
+share one border/radius/padding, verdict/progress/delete cards
+share one muted border, the search box has a dark surface with a
+soft shadow and an indigo focus ring, and Details sections have a
+single muted border instead of stacked default lines.
+
 ## Colour, ⋮ menus, and the "folder is gone" fix (v1.12, 31 Oct 2026)
 
 - **Colour:** a real Streamlit theme (`.streamlit/config.toml`) —

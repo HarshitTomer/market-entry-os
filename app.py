@@ -38,34 +38,55 @@ st.set_page_config(page_title="MarketEntryOS", layout="wide",
 
 st.markdown("""
 <style>
+  /* Dark, low-glare base. No pure white anywhere: surfaces are slate,
+     text is soft off-white, borders are one muted line. */
   #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {visibility: hidden; height: 0;}
-  [data-testid="stSidebar"] {background: #f9fafb; border-right: 1px solid #e5e7eb;
+  .stApp {background-color: #0f172a;}
+  [data-testid="stSidebar"] {background: #1e293b; border-right: 1px solid #334155;
     min-width: 290px; max-width: 290px;}
+  [data-testid="stSidebar"] > div:first-child {padding-top: 1rem;}
   [data-testid="stSidebar"] .stButton button {
-    text-align: left; background: transparent; border: none; color: #374151;
-    padding: 8px 12px; border-radius: 10px; font-size: 0.92rem; box-shadow: none;
-    white-space: normal; word-break: break-word; line-height: 1.35;}
-  [data-testid="stSidebar"] .stButton button:hover {background: #eceef1; color: #111827;}
-  .block-container {max-width: 760px; padding-top: 1.5rem; padding-bottom: 3rem;}
-  h1, h2, h3 {font-weight: 650; letter-spacing: -0.02em; color: #111827;}
-  .muted {color: #6b7280; font-size: 0.9rem;}
+    text-align: left; background: transparent; border: 1px solid transparent;
+    color: #e2e8f0; padding: 9px 12px; border-radius: 10px; font-size: 0.92rem;
+    box-shadow: none; white-space: normal; word-break: break-word; line-height: 1.35;
+    min-height: 42px; display: flex; align-items: center;}
+  [data-testid="stSidebar"] .stButton button:hover {background: #334155; color: #f1f5f9; border-color: #475569;}
+  .block-container {max-width: 760px; padding-top: 1.25rem; padding-bottom: 3rem;
+    margin-left: auto; margin-right: auto;}
+  h1, h2, h3 {font-weight: 650; letter-spacing: -0.02em; color: #f1f5f9; line-height: 1.25;}
+  h1 {margin-bottom: 0.25rem;}
+  .muted {color: #94a3b8; font-size: 0.9rem;}
   .pill {display: inline-block; padding: 3px 14px; border-radius: 999px;
          font-size: 0.85rem; font-weight: 650;}
-  .pill-go {background: #dcfce7; color: #166534;}
-  .pill-conditional {background: #fef3c7; color: #92400e;}
-  .pill-nogo {background: #fee2e2; color: #991b1b;}
-  .user-msg {background: #f3f4f6; border-radius: 18px; padding: 12px 18px; margin: 1rem 0; line-height: 1.5;}
+  .pill-go {background: #14532d; color: #bbf7d0;}
+  .pill-conditional {background: #78350f; color: #fde68a;}
+  .pill-nogo {background: #7f1d1d; color: #fecaca;}
+  .user-msg {background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+    border-radius: 18px; padding: 12px 18px; margin: 1rem 0; line-height: 1.55;}
   .stTextArea textarea {border-radius: 20px; padding: 14px 18px; font-size: 1.05rem;
-    border: 1px solid #d1d5db; box-shadow: 0 1px 6px rgba(0,0,0,0.06);}
-  .stTextArea textarea:focus {border-color: #111827; box-shadow: 0 1px 8px rgba(0,0,0,0.10);}
-  .stButton button {border-radius: 999px;}
-  [data-testid="stMetric"] {background: #ffffff; border: 1px solid #e5e7eb;
+    background-color: #1e293b !important; color: #e2e8f0 !important;
+    border: 1px solid #475569 !important; box-shadow: 0 4px 20px rgba(0,0,0,0.35);}
+  .stTextArea textarea:focus {border-color: #818cf8 !important; box-shadow: 0 4px 24px rgba(0,0,0,0.45);}
+  .stTextArea textarea::placeholder {color: #64748b;}
+  .stButton button {border-radius: 999px; min-height: 42px; font-weight: 500;}
+  .stButton button[kind="primary"] {background-color: #818cf8; color: #0f172a; border: none;}
+  [data-testid="stMetric"] {background: #1e293b; border: 1px solid #334155;
     border-radius: 16px; padding: 14px 16px;}
-  [data-testid="stProgress"] > div > div {background-color: #4f46e5;}
-  .step-done {color: #374151; font-weight: 600;}
-  .step-now {color: #4f46e5; font-weight: 700; text-decoration: underline;
+  [data-testid="stMetric"] label {color: #94a3b8;}
+  [data-testid="stMetric"] [data-testid="stMetricValue"] {color: #f1f5f9;}
+  [data-testid="stProgress"] > div > div {background-color: #818cf8;}
+  [data-testid="stProgress"] > div {background-color: #334155;}
+  .step-done {color: #cbd5e1; font-weight: 600;}
+  .step-now {color: #a5b4fc; font-weight: 700; text-decoration: underline;
     text-underline-offset: 4px;}
-  .step-next {color: #9ca3af;}
+  .step-next {color: #64748b;}
+  /* Bordered cards (verdict, progress, delete confirm): one muted line,
+     consistent radius and padding, no double borders. */
+  [data-testid="stVerticalBlockBorderWrapper"] {border-color: #334155 !important;
+    border-radius: 16px !important;}
+  details {border: 1px solid #334155; border-radius: 12px; padding: 8px 12px;}
+  summary {color: #e2e8f0;}
+  hr {border-color: #334155;}
 </style>
 """, unsafe_allow_html=True)
 
