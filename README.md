@@ -26,6 +26,20 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Interface, refined (v1.8, 31 Oct 2026)
+
+Chat-style, not form-style. One search box, nothing else to fill
+in — the parser infers country, industry, size, ACV and buyer roles
+from plain words, so a founder is never asked six questions before
+they can start. The sidebar holds New search + recent conversations,
+like ChatGPT. The answer is refined: your brief as a message, a
+verdict in one sentence, three numbers, the top 5 accounts, and one
+button to download the report. Charts, tables, drafts, evidence and
+files are still there, but under one collapsed "Details" section —
+advanced controls (filters, sliders, checklists, simulators) were
+removed from the main view, not from the engine. The CLI and API
+still expose everything.
+
 ## History (v1.7, 31 Oct 2026)
 
 Every mission — CLI, API, or UI — is recorded in
