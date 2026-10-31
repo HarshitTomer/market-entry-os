@@ -30,6 +30,16 @@ def build_draft(brief, company, signals: list[str], buyers_for_company: list) ->
     buyer_names = ", ".join(p.name for p in buyers_for_company) if buyers_for_company else "the relevant buyer"
     buyer_titles = ", ".join(sorted({p.title for p in buyers_for_company if p.title})) if buyers_for_company else ""
     signal_line = "; ".join(signals) if signals else "a profile in the target size range"
+    # Value prop: first sentence of the description, or the product name
+    # alone — never a mid-sentence truncation of a full free-text brief.
+    desc = (brief.product_description or "").strip()
+    if desc and len(desc) <= 200:
+        value_prop = desc
+    elif desc:
+        first = desc.split(". ")[0].strip()
+        value_prop = first if len(first) <= 200 else brief.product_name
+    else:
+        value_prop = brief.product_name
     lines = [
         "UNSENT DRAFT — do not send without human approval.",
         f"Subject: {brief.product_name} for {company.name}",
@@ -37,7 +47,7 @@ def build_draft(brief, company, signals: list[str], buyers_for_company: list) ->
         f"Hi {buyer_names},",
         "",
         f"I noticed {company.name} ({signal_line}).",
-        f"We help companies like yours with {brief.product_description[:160] or brief.product_name}.",
+        f"We help companies like yours with {value_prop}.",
     ]
     if buyer_titles:
         matched = [t for t in buyer_titles.split(", ") if t in (brief.target_buyer_roles or [])]
@@ -54,7 +64,8 @@ def build_draft(brief, company, signals: list[str], buyers_for_company: list) ->
 
 
 def decision_card(ranked: list[dict], buyer_count: int, sizing: dict,
-                  verified_fraction: float | None, warnings: list[str]) -> dict:
+                  verified_fraction: float | None, warnings: list[str],
+                  role_verified_count: int | None = None) -> dict:
     """GO / CONDITIONAL / NO-GO, deterministically. Thresholds are stated
     in the output so a judge can disagree with the rule, not just the result."""
     n = len(ranked)
@@ -73,8 +84,13 @@ def decision_card(ranked: list[dict], buyer_count: int, sizing: dict,
         risks.append("No ACV supplied, so no monetary sizing is available.")
     if any("semantic search" in w for w in warnings):
         risks.append("Industry matching is semantic, not a taxonomy filter — relevance is approximate (caveat, not a blocker).")
+    if any("not role-verified buyers" in w for w in warnings):
+        risks.append("Buyer roles were not stated in the brief, so mapped people are senior contacts, not role-verified buyers (caveat, not a blocker).")
     blockers = [r for r in risks if "caveat" not in r]
-    if n >= 5 and buyer_count >= 3 and avg_coverage >= 0.5 and not blockers:
+    # GO requires role-verified buyers when that count is known; contacts
+    # alone can only ever give CONDITIONAL, never GO.
+    go_buyers = role_verified_count if role_verified_count is not None else buyer_count
+    if n >= 5 and go_buyers >= 3 and avg_coverage >= 0.5 and not blockers:
         verdict, confidence = "GO", "high"
     elif n >= 3 and buyer_count >= 1:
         verdict, confidence = "CONDITIONAL", "medium"

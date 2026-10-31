@@ -26,6 +26,41 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Audit fixes (v1.4, 31 Oct 2026)
+
+Found by re-reading the live results, not by reading docs:
+
+- **Industry "PRIVATE" bug, fixed:** live enrich records carry
+  `basic_info.markets=["PRIVATE"]` (ownership), which overwrote the good
+  search taxonomy ("Software Development"). Markets are no longer used
+  as an industry, and generic labels are stripped; enrich can no longer
+  downgrade a search industry.
+- **Buyer roles are now keyword-verified:** "Compliance Manager"
+  matches "Head of Compliance", "VP Marketing" does not match
+  "VP Security". People with unverified roles are kept as contacts in
+  Buyer_Map (`role_verified=false`) but earn no buyer score points and
+  are not counted as verified buyers. Buyer enrich is rejected if it
+  swaps the person to a different company.
+- **Competitor enrich is throttled** (1s spacing, like company enrich)
+  after a v1.3 competitor enrich hit a 429.
+- **Score breakdown** is now in Target_Accounts.csv (`icp/growth/hiring/
+  fit/buyer`) so a fit score can be checked, not just trusted.
+- **Launch checklist** (spec Step H) and evidence references per account
+  are in the report and CSV; Buyer_Map flags role-unverified contacts.
+- **Person normalizer fixed to live response fields:** current jobs
+  carry `company_website` and `crustdata_company_id`, not the filter
+  field names — domains and company IDs in Buyer_Map were wrong
+  before this fix. Enrich no longer overwrites a precise search
+  headcount with a range midpoint, and post-enrich headcount filtering
+  drops companies actually outside the target range.
+- **Honest buyer outcome on the live spec brief:** no top-5 account
+  has a compliance/security buyer in Crustdata, so the packet maps
+  8 senior contacts (CEO/CFO/heads) labelled adjacent, not compliance
+  buyers, scores them 0 buyer points, and the decision is CONDITIONAL
+  — not a fabricated GO. Enrich throttling at 2s removed the 429s
+  entirely in the final live run (10 accounts, 8 contacts,
+  12 competitors, 195 × £12,000 = £2,340,000, zero trace errors).
+
 ## Usability (v1.3, 31 Oct 2026)
 
 Built for the question a buyer actually asks — "should we enter, who first,

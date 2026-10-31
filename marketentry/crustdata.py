@@ -107,6 +107,10 @@ class Company:
     raw: dict = field(default_factory=dict)
 
 
+GENERIC_INDUSTRIES = {"PRIVATE", "PUBLIC", "PRIVATE COMPANY", "PUBLIC COMPANY",
+                      "PRIVATELY HELD", "UNKNOWN", "OTHER"}
+
+
 @dataclass
 class Person:
     person_id: str
@@ -115,7 +119,23 @@ class Person:
     company_name: str = ""
     company_domain: str = ""
     company_id: str = ""
+    role_verified: bool = False
     raw: dict = field(default_factory=dict)
+
+
+def role_matches(title: str, roles: list[str]) -> bool:
+    """Keyword role match, not full-phrase match: 'Compliance Manager'
+    matches 'Head of Compliance' via 'compliance', 'CISO' via 'ciso'.
+    Empty title never matches."""
+    if not title or not roles:
+        return False
+    stop = {"head", "of", "chief", "vp", "vice", "president", "director", "officer"}
+    t = title.lower()
+    for role in roles:
+        words = [w for w in role.lower().replace("/", " ").split() if w not in stop]
+        if words and any(w in t for w in words):
+            return True
+    return False
 
 
 def normalize_company(raw: dict) -> Company:
@@ -140,8 +160,16 @@ def normalize_company(raw: dict) -> Company:
     if not industry:
         inds = _first(raw, "industry", "industries")
         industry = inds[0] if isinstance(inds, list) and inds else (inds or "")
+    # basic_info.markets is NOT an industry here: live enrich records
+    # carry markets=["PRIVATE"] (ownership), which previously overwrote
+    # a good search taxonomy ("Software Development") with "PRIVATE".
+    # Only use a markets value that is not a generic ownership label.
     if not industry and isinstance(basic.get("markets"), list) and basic["markets"]:
-        industry = str(basic["markets"][0])
+        cand = str(basic["markets"][0]).strip().upper()
+        if cand not in GENERIC_INDUSTRIES:
+            industry = str(basic["markets"][0])
+    if industry.strip().upper() in GENERIC_INDUSTRIES:
+        industry = ""
     # Country codes from locations.country (GBR, USA, ...) -> names, when
     # the headquarters string is absent.
     _COUNTRY_CODES = {"GBR": "United Kingdom", "USA": "United States",
@@ -152,6 +180,14 @@ def normalize_company(raw: dict) -> Company:
     emp = _first(head, "total") or _first(raw, "employee_count", "headcount")
     if isinstance(emp, dict):
         emp = _first(emp, "total")
+    if emp is None:
+        # Enrich records carry employee_count_range ("51-200") with no
+        # total; use its midpoint as an estimate, flagged by the range.
+        import re as _re
+        rng = _first(basic, "employee_count_range") or ""
+        m = _re.match(r"\s*(\d+)\s*-\s*(\d+)", str(rng))
+        if m:
+            emp = (int(m.group(1)) + int(m.group(2))) // 2
     try:
         emp = int(emp) if emp is not None else None
     except (TypeError, ValueError):
@@ -194,15 +230,21 @@ def normalize_person(raw: dict) -> Person:
     name = _first(basic, "name") or _first(raw, "name") or "Unknown person"
     title = _first(cur, "title") or _first(basic, "current_title") or _first(raw, "title") or ""
     comp = _first(cur, "company_name") or _first(cur, "name") or _first(raw, "company_name") or ""
-    dom = _first(cur, "company_website_domain") or ""
+    # Live response fields differ from the filter field names: the
+    # current job carries company_website (full URL) and
+    # crustdata_company_id, not company_website_domain / company_id.
+    dom = _first(cur, "company_website_domain") or _first(cur, "company_website") or ""
     if not dom:
         doms = _first(cur, "company_domains") or []
         dom = doms[0] if isinstance(doms, list) and doms else ""
     dom = dom or _first(cur, "domain") or _first(raw, "company_domain") or ""
+    dom = str(dom).replace("https://", "").replace("http://", "").split("/")[0].split("?")[0].lower()
+    if dom.startswith("www."):
+        dom = dom[4:]
     pid = str(_first(raw, "crustdata_person_id", "person_id", "id", "profile_id") or name)
     person = Person(person_id=pid, name=str(name), title=str(title),
-                    company_name=str(comp), company_domain=str(dom).lower(), raw=raw)
-    person.company_id = str(_first(cur, "company_id") or "")
+                    company_name=str(comp), company_domain=dom, raw=raw)
+    person.company_id = str(_first(cur, "company_id", "crustdata_company_id") or "")
     return person
 
 
@@ -368,10 +410,18 @@ class CrustdataClient:
         if best is None:
             return None
         enriched = normalize_company(best)
-        for attr in ("name", "domain", "country", "industry", "employee_count",
-                     "headcount_growth", "open_roles", "funding_usd", "description"):
+        # Search record wins for firmographics: enrich is a coarser
+        # source (employee_count_range midpoint, no taxonomy), so it must
+        # not overwrite a precise search total or industry. Enrich only
+        # fills fields the search record lacks (funding, growth, description).
+        for attr in ("employee_count", "industry", "country", "name", "domain"):
+            if getattr(company, attr) not in (None, ""):
+                setattr(enriched, attr, getattr(company, attr))
+        for attr in ("headcount_growth", "open_roles", "funding_usd", "description"):
             if getattr(enriched, attr) in (None, "", 0) and getattr(company, attr) not in (None, ""):
                 setattr(enriched, attr, getattr(company, attr))
+        if enriched.industry.strip().upper() in GENERIC_INDUSTRIES and company.industry:
+            enriched.industry = company.industry
         enriched.company_id = company.company_id
         enriched.raw = best
         return enriched
@@ -418,16 +468,14 @@ class CrustdataClient:
                 continue
             if not p.company_id:
                 p.company_id = company.company_id
+            p.role_verified = role_matches(p.title, roles)
             verified.append(p)
-        role_words = [r.lower() for r in roles]
-        if not role_words:
-            # No roles stated in the brief: keep company-verified people,
-            # do not invent a role filter. Callers must treat titles as
-            # role-unverified (see Buyer_Map missing_data handling).
+        if not roles:
+            # No roles stated in the brief: keep company-verified people
+            # as contacts, but role_verified stays False. Callers must
+            # not count them as role-verified buyers.
             return verified, warnings
-        matched = [p for p in verified
-                   if any(w in p.title.lower() for w in role_words) or not p.title]
-        return matched, warnings
+        return [p for p in verified if p.role_verified], warnings
 
     def enrich_person(self, person: Person) -> Person | None:
         """Best effort, plural-ID shape like company enrich. Untested

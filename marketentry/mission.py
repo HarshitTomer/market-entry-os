@@ -99,14 +99,28 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
             break
         if enriched:
             # Space enrich calls: the live enrich endpoint rate-limits
-            # bursts (31 Oct 2026 live run: first 7 back-to-back calls 429'd).
+            # bursts (31 Oct 2026: back-to-back calls 429'd, and a v1.4
+            # run still hit a 429 at 1s spacing, so use 2s).
             import time as _time
-            _time.sleep(1.0)
+            _time.sleep(2.0)
         got = client.enrich_company(c)
         enriched.append(got or c)
         if got is None:
             warnings.append(f"Enrichment failed for {c.name}: keeping search record, marked unverified.")
     enriched.extend(companies[brief.max_company_enrichments:])
+    # Post-enrich headcount filter: an enrich range can reveal a company
+    # is actually outside the target range (live: a 1–10-person company
+    # in a 50–500 brief). Drop it honestly, do not rank it.
+    if mode == "live" and (brief.employee_min is not None or brief.employee_max is not None):
+        kept_enriched = []
+        for c in enriched:
+            if c.employee_count is not None and (
+                    (brief.employee_min is not None and c.employee_count < brief.employee_min)
+                    or (brief.employee_max is not None and c.employee_count > brief.employee_max)):
+                warnings.append(f"Removed {c.name} after enrich: headcount {c.employee_count} is outside the target range {brief.employee_min}–{brief.employee_max}.")
+                continue
+            kept_enriched.append(c)
+        enriched = kept_enriched
 
     # Step D: competitors (keyword company search + web search, best effort)
     competitors: list[dict] = []
@@ -138,13 +152,16 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                             "company_id": "sample-comp", "industry": brief.target_industry,
                             "employee_count": 250, "classification": "possible competitor",
                             "evidence": "Sample data (smoke test only)"})
-    # Enrich competitors (bounded) and upgrade classification only on
-    # observed evidence: enriched industry matching the target industry
-    # with a known domain => confirmed; otherwise it stays possible.
+    # Enrich competitors (bounded, throttled like company enrich — the
+    # live 429 in v1.3 came from this unthrottled loop) and upgrade
+    # classification only on observed evidence.
     if mode == "live":
-        for comp in competitors:
+        import time as _time2
+        for _ci, comp in enumerate(competitors):
             if not comp.get("domain"):
                 continue
+            if _ci:
+                _time2.sleep(2.0)
             probe = Company(company_id=comp["company_id"] or comp["domain"],
                             name=comp["name"], domain=comp["domain"])
             got = client.enrich_company(probe)
@@ -155,14 +172,16 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                     comp["classification"] = "confirmed competitor"
                     comp["evidence"] += " + Crustdata company enrich (industry match observed)"
 
-    # Step E: buyers for top 5 accounts
+    # Step E: buyers for top 5 accounts. buyer_counts counts
+    # role-verified buyers only; contacts with unverified roles are kept
+    # in Buyer_Map as contacts, not scored as buyers.
     buyers: list[Person] = []
     buyer_counts: dict[str, int] = {}
     for c in enriched[:5]:
         if sample:
             p = Person(person_id=f"sample-{c.company_id}", name="Sample Buyer",
                        title="Head of Compliance", company_name=c.name,
-                       company_domain=c.domain, company_id=c.company_id)
+                       company_domain=c.domain, company_id=c.company_id, role_verified=True)
             buyers.append(p); buyer_counts[c.company_id] = 1
             continue
         if mode != "live":
@@ -172,16 +191,42 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                                              limit=brief.max_contacts_per_company * 2)
         warnings.extend(warns)
         kept = people[:brief.max_contacts_per_company]
-        buyers.extend(kept); buyer_counts[c.company_id] = len(kept)
+        if not kept and brief.target_buyer_roles:
+            # Fallback, labelled not fabricated: no role-verified buyer
+            # exists in Crustdata for this account, so surface senior
+            # contacts (CEO/CFO/CTO/heads) as adjacent contacts for a
+            # human to approve — never relabelled as compliance buyers.
+            contacts, _ = client.search_people(c, [], limit=brief.max_contacts_per_company * 2)
+            senior = [p for p in contacts if any(k in p.title.lower() for k in
+                      ("ceo", "cfo", "cto", "chief", "founder", "head of", "director", "general counsel"))]
+            kept = senior[:brief.max_contacts_per_company]
+            if kept:
+                warnings.append(f"{c.name}: no role-verified buyer found; mapped senior contacts are adjacent contacts, not compliance buyers.")
+        buyers.extend(kept)
+        buyer_counts[c.company_id] = sum(1 for p in kept if p.role_verified)
         if not kept:
             warnings.append(f"No verified buyer found for {c.name}: marked buyer_not_found, no name fabricated.")
+        elif buyer_counts[c.company_id] == 0 and not brief.target_buyer_roles:
+            warnings.append(f"{c.name}: mapped people are senior contacts, not role-verified buyers (no buyer roles stated in the brief).")
 
-    # Buyer enrich (best effort, only where the record supports it).
+    # Buyer enrich (best effort, only where the record supports it):
+    # accept an enriched record only if it still matches the same
+    # company, otherwise the enrichment has swapped the person.
     if mode == "live":
+        import time as _time3
         enriched_buyers: list[Person] = []
-        for p in buyers[:3]:
+        for _pi, p in enumerate(buyers[:3]):
+            if _pi:
+                _time3.sleep(1.0)
             got = client.enrich_person(p)
-            enriched_buyers.append(got or p)
+            if got and (not got.company_domain or got.company_domain == p.company_domain
+                        or (got.company_id and got.company_id == p.company_id)):
+                got.company_id = p.company_id or got.company_id
+                got.company_domain = p.company_domain or got.company_domain
+                got.company_name = p.company_name or got.company_name
+                enriched_buyers.append(got)
+            else:
+                enriched_buyers.append(p)
         if enriched_buyers:
             buyers[:len(enriched_buyers)] = enriched_buyers
 
@@ -193,12 +238,13 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
             (c.industry and brief.target_industry.lower() in c.industry.lower())
             or ("fintech" in desc and "fintech" in brief.target_industry.lower())
             or (brief.target_industry and brief.target_industry.split()[0].lower() in desc))
-        score, coverage, unknowns = score_company(
+        score, coverage, unknowns, breakdown = score_company(
             c, brief, buyer_count=buyer_counts.get(c.company_id, 0),
             keyword_overlap=kw_overlap)
         status = "verified" if coverage >= 0.6 and c.domain else "unverified"
         ranked.append({"company": c, "fit_score": score, "coverage": coverage,
-                       "unknowns": unknowns, "verification_status": status})
+                       "unknowns": unknowns, "verification_status": status,
+                       "breakdown": breakdown})
     ranked.sort(key=lambda r: (-r["fit_score"], -r["coverage"]))
     from .usability import build_draft, decision_card, signals_for
     for i, r in enumerate(ranked):
@@ -255,7 +301,9 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     warnings = list(dict.fromkeys(warnings))  # competitor step re-adds the same industry/sizing notes
     verified = sum(1 for e in evidence if e["status"] == "supported")
     verified_fraction = round(verified / len(evidence), 3) if evidence else None
-    decision = decision_card(ranked, len(buyers), sizing, verified_fraction, warnings)
+    role_buyer_total = sum(buyer_counts.values())
+    decision = decision_card(ranked, len(buyers), sizing, verified_fraction, warnings,
+                             role_verified_count=role_buyer_total if brief.target_buyer_roles else None)
     artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace, decision=decision)
     result = {
         "mission_id": mission_id, "state": state, "mode": mode,
@@ -270,6 +318,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         "ranked": [{"rank": r["rank"], "name": r["company"].name, "domain": r["company"].domain,
                     "fit_score": r["fit_score"], "coverage": r["coverage"],
                     "wave": r["wave"], "verification_status": r["verification_status"],
+                    "breakdown": r.get("breakdown", {}),
                     "signals": r.get("signals", []), "draft": r.get("draft", ""),
                     "unknowns": r["unknowns"]} for r in ranked],
     }

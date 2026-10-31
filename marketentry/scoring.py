@@ -28,11 +28,12 @@ def _in_range(v, lo, hi):
 
 
 def score_company(c: Company, brief: MarketBrief, buyer_count: int = 0,
-                  keyword_overlap: bool = False) -> tuple[int, float, list[str]]:
+                  keyword_overlap: bool = False) -> tuple[int, float, list[str], dict]:
     unknowns: list[str] = []
     score = 0
     observed_fields = 0
     total_fields = 5  # industry, headcount, growth, roles, funding
+    breakdown: dict[str, int] = {"icp": 0, "growth": 0, "hiring": 0, "fit": 0, "buyer": 0}
 
     # ICP: industry (20) + headcount in range (15)
     # Partial credit (10) for a shared industry token, e.g. "financial"
@@ -43,17 +44,17 @@ def score_company(c: Company, brief: MarketBrief, buyer_count: int = 0,
     if c.industry:
         observed_fields += 1
         if brief.target_industry and brief.target_industry.lower() in c.industry.lower():
-            score += 20
+            breakdown["icp"] += 20
         elif brief.target_industry and set(brief.target_industry.lower().split()) & set(c.industry.lower().split()):
-            score += 10
+            breakdown["icp"] += 10
         elif not brief.target_industry:
-            score += 10
+            breakdown["icp"] += 10
     else:
         unknowns.append("industry unknown")
     if c.employee_count is not None:
         observed_fields += 1
         if _in_range(c.employee_count, brief.employee_min, brief.employee_max):
-            score += 15
+            breakdown["icp"] += 15
     else:
         unknowns.append("headcount unknown")
 
@@ -69,29 +70,31 @@ def score_company(c: Company, brief: MarketBrief, buyer_count: int = 0,
         growth_points = 10
     else:
         unknowns.append("growth signals unknown")
-    score += growth_points
+    breakdown["growth"] = growth_points
 
     # Hiring (15)
     if c.open_roles is not None:
         observed_fields += 1
-        score += 15 if c.open_roles > 0 else 5
+        breakdown["hiring"] = 15 if c.open_roles > 0 else 5
     else:
         unknowns.append("open roles unknown")
 
     # Product-need fit (15): keyword overlap is a weak, labelled signal.
     if keyword_overlap:
-        score += 15
+        breakdown["fit"] = 15
     else:
         unknowns.append("product-need fit not evidenced (no keyword overlap observed)")
 
-    # Buyer availability (15)
+    # Buyer availability (15) — role-verified buyers only; senior contacts
+    # with unverified roles do not earn these points.
     if buyer_count > 0:
-        score += 15
+        breakdown["buyer"] = 15
     else:
-        unknowns.append("no verified buyer found yet")
+        unknowns.append("no role-verified buyer found yet")
 
+    score = sum(breakdown.values())
     coverage = round(observed_fields / total_fields, 2)
-    return min(score, 100), coverage, unknowns
+    return min(score, 100), coverage, unknowns, breakdown
 
 
 def wave_for(rank: int, total: int) -> str:

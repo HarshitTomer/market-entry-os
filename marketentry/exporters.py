@@ -24,10 +24,15 @@ def _write_csv(path: Path, fieldnames: list[str], rows: list[dict]):
 
 def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
                     sizing, evidence, warnings, mode, trace, decision: dict | None = None) -> list[str]:
+    ev_by_company: dict[str, list[str]] = {}
+    for e in evidence:
+        ev_by_company.setdefault(str(e["subject_id"]), []).append(e["evidence_id"])
     _write_csv(out / "Target_Accounts.csv",
                ["rank", "name", "crustdata_company_id", "domain", "country",
-                "industry", "employee_count", "open_roles", "fit_score",
-                "coverage", "wave", "verification_status", "signals", "unknowns"],
+                "industry", "employee_count", "open_roles", "funding_usd",
+                "headcount_growth", "fit_score", "score_breakdown",
+                "coverage", "wave", "verification_status", "signals",
+                "evidence_refs", "unknowns"],
                [{"rank": r["rank"], "name": r["company"].name,
                  "crustdata_company_id": r["company"].company_id,
                  "domain": r["company"].domain or "unknown",
@@ -35,19 +40,26 @@ def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
                  "industry": r["company"].industry or "unknown",
                  "employee_count": r["company"].employee_count if r["company"].employee_count is not None else "unknown",
                  "open_roles": r["company"].open_roles if r["company"].open_roles is not None else "unknown",
-                 "fit_score": r["fit_score"], "coverage": r["coverage"],
+                 "funding_usd": r["company"].funding_usd if r["company"].funding_usd is not None else "unknown",
+                 "headcount_growth": r["company"].headcount_growth if r["company"].headcount_growth is not None else "unknown",
+                 "fit_score": r["fit_score"],
+                 "score_breakdown": "; ".join(f"{k}:{v}" for k, v in r.get("breakdown", {}).items()),
+                 "coverage": r["coverage"],
                  "wave": r["wave"], "verification_status": r["verification_status"],
                  "signals": "; ".join(r.get("signals", [])),
+                 "evidence_refs": "; ".join(ev_by_company.get(str(r["company"].company_id), [])),
                  "unknowns": "; ".join(r["unknowns"])} for r in ranked])
 
     _write_csv(out / "Buyer_Map.csv",
                ["name", "title", "company_name", "company_domain",
-                "crustdata_company_id", "verified_employment", "missing_data"],
+                "crustdata_company_id", "verified_employment", "role_verified", "missing_data"],
                [{"name": p.name, "title": p.title or "unknown",
                  "company_name": p.company_name, "company_domain": p.company_domain or "unknown",
                  "crustdata_company_id": p.company_id,
                  "verified_employment": bool(p.company_domain),
-                 "missing_data": "email intentionally omitted (never fabricated)"} for p in buyers])
+                 "role_verified": bool(getattr(p, "role_verified", False)),
+                 "missing_data": "email intentionally omitted (never fabricated)"
+                 + ("" if getattr(p, "role_verified", False) else "; buyer role not verified against the brief")} for p in buyers])
 
     _write_csv(out / "Competitive_Landscape.csv",
                ["name", "domain", "industry", "employee_count", "classification", "evidence"],
@@ -110,6 +122,11 @@ any outreach draft is used. No prospect was contacted: all outreach is an unsent
 <h2>Bottom-up market sizing</h2>{sizing_html}
 <h2>Ranked target accounts</h2>
 <table><tr><th>Rank</th><th>Company</th><th>Domain</th><th>Fit / 100</th><th>Coverage</th><th>Wave</th></tr>{rows_html}</table>
+<h2>Launch checklist (spec Step H)</h2>
+<p>Wave 1 — contact first, using the account-specific unsent draft in the CRM: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Wave 1') or 'none'}.</p>
+<p>Wave 2 — contact after Wave 1 replies: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Wave 2') or 'none'}.</p>
+<p>Research Needed — do not contact yet; resolve the unknowns in Target_Accounts.csv first: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Research Needed') or 'none'}.</p>
+<p>Before any send: a human approves each draft, confirms the buyer's role, and checks the evidence log for that account. Nothing in this packet has been sent.</p>
 <h2>Competitors</h2><p>{len(competitors)} competitor records (see Competitive_Landscape.csv).
 Classifications are confirmed / possible / insufficient evidence — never stronger than the evidence.</p>
 <h2>Buyers</h2><p>{len(buyers)} verified buyers mapped (see Buyer_Map.csv). No email addresses are included.</p>
