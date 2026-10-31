@@ -26,6 +26,27 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Interactive results (v1.6, 31 Oct 2026)
+
+The front page stays a clean search box. After a run, the results are
+interactive, not just readable — and the user always knows the next
+action:
+
+- **What to do next** checklist at the top (review top 5, approve
+  Wave 1 drafts, check one claim, download the packet) with a progress
+  bar. Plus a **Path to GO** simulator, clearly labelled as a
+  simulation: tick "buyers verified" / "coverage above 0.5" to see how
+  the verdict would move — ticking a box re-verifies nothing.
+- **Charts:** fit scores, fit vs coverage scatter (top-right is best),
+  shortlist by wave, pool vs shortlist pipeline, competitor
+  classification counts.
+- **Account inspector:** filter by minimum fit and wave, pick one
+  account, see its score breakdown as a chart, its signals and
+  unknowns, edit its outreach draft, and approve it in-session.
+  Approval only marks it ready — nothing is sent.
+- **Full report readable in the app** (Files & CRM tab), alongside
+  downloads, the research trace, and the CRM tables.
+
 ## Interface (v1.5, 31 Oct 2026)
 
 Search-first, not dashboard-first. The front page is one large text

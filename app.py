@@ -110,6 +110,37 @@ if result:
                 for r in d["risks"]:
                     st.write("•", r)
 
+    # What to do next — the user should never wonder what the next click is.
+    st.markdown("### What to do next")
+    if "next_steps" not in st.session_state:
+        st.session_state["next_steps"] = {}
+    steps = ["Review the top 5 accounts", "Approve the Wave 1 drafts",
+             "Check one claim against its evidence", "Download the report packet"]
+    done = 0
+    for step in steps:
+        if st.checkbox(step, value=st.session_state["next_steps"].get(step, False), key=f"step_{step}"):
+            st.session_state["next_steps"][step] = True
+            done += 1
+        else:
+            st.session_state["next_steps"][step] = False
+    st.progress(done / len(steps))
+    st.caption(f"{done} of {len(steps)} done — this is your launch checklist, not a send button.")
+
+    # Path to GO — interactive, clearly labelled as a simulation, not a
+    # new verified result. It shows what work would change the verdict.
+    if d and d["verdict"] != "GO":
+        st.markdown("### What would it take to get to GO?")
+        buyers_fixed = st.checkbox("Role-verified buyers found for the top accounts", value=False)
+        coverage_fixed = st.checkbox("Evidence coverage raised above 0.5", value=False)
+        if buyers_fixed and coverage_fixed and not d["risks"]:
+            st.success("Simulated: GO — if both gaps are actually closed and re-verified.")
+        elif buyers_fixed and coverage_fixed:
+            st.info("Simulated: still CONDITIONAL until the remaining risks are also resolved.")
+        elif buyers_fixed or coverage_fixed:
+            st.info("Simulated: one gap closed, one remains. The verdict does not change yet.")
+        else:
+            st.caption("Tick the gaps above to see how the verdict would move. Nothing is re-verified by ticking a box.")
+
     tab_overview, tab_accounts, tab_people, tab_files = st.tabs(
         ["Overview", "Accounts", "People & competitors", "Files & CRM"])
 
@@ -134,18 +165,68 @@ if result:
         if result["ranked"]:
             st.markdown("### Fit scores")
             st.bar_chart({r["name"]: r["fit_score"] for r in result["ranked"]})
+            st.markdown("### Fit vs evidence coverage")
+            st.caption("Top-right is best: high fit and high coverage. Bottom-left needs more research before outreach.")
+            st.scatter_chart(
+                [{"Company": r["name"], "Fit": r["fit_score"], "Coverage": r["coverage"]}
+                 for r in result["ranked"]],
+                x="Fit", y="Coverage")
+            st.markdown("### Shortlist by wave")
+            waves = {}
+            for r in result["ranked"]:
+                waves[r["wave"]] = waves.get(r["wave"], 0) + 1
+            st.bar_chart(waves)
+            if s["serviceable_annual_pool"] is not None:
+                st.markdown("### Pool vs shortlist pipeline")
+                st.bar_chart({"Serviceable pool": s["serviceable_annual_pool"],
+                              "Shortlist pipeline": s["shortlist_pipeline_pool"]})
 
     with tab_accounts:
+        st.markdown("### Explore the shortlist")
+        min_fit = st.slider("Minimum fit score", 0, 100, 0)
+        wave_filter = st.multiselect("Waves", ["Wave 1", "Wave 2", "Research Needed"],
+                                     default=["Wave 1", "Wave 2", "Research Needed"])
+        filtered = [r for r in result["ranked"]
+                    if r["fit_score"] >= min_fit and r["wave"] in wave_filter]
+        st.caption(f"Showing {len(filtered)} of {len(result['ranked'])} accounts — filters only change the view, not the verified results.")
         rows = [{"Rank": r["rank"], "Company": r["name"], "Domain": r["domain"],
                  "Fit": r["fit_score"], "Coverage": r["coverage"], "Wave": r["wave"],
-                 "Signals": "; ".join(r.get("signals", []))} for r in result["ranked"]]
+                 "Signals": "; ".join(r.get("signals", []))} for r in filtered]
         st.dataframe(rows, use_container_width=True, hide_index=True)
-        st.markdown("### Outreach drafts (unsent)")
-        st.caption("Approve and edit before any use. Nothing here has been sent.")
-        for r in result["ranked"][:5]:
-            with st.expander(f"{r['rank']}. {r['name']} — {r['wave']}"):
-                st.write("; ".join(r.get("signals", [])) or "No observed signals")
-                st.code(r.get("draft", ""))
+
+        if filtered:
+            st.markdown("### Inspect one account")
+            chosen_name = st.selectbox("Account", [r["name"] for r in filtered])
+            chosen = next(r for r in filtered if r["name"] == chosen_name)
+            st.write(f"**{chosen['name']}** ({chosen['domain']}) — fit {chosen['fit_score']}, "
+                     f"coverage {chosen['coverage']}, {chosen['wave']}")
+            st.write("; ".join(chosen.get("signals", [])) or "No observed signals")
+            if chosen.get("breakdown"):
+                st.markdown("**Why this score**")
+                st.bar_chart(chosen["breakdown"])
+            if chosen.get("unknowns"):
+                st.caption("Unknowns: " + "; ".join(chosen["unknowns"]))
+            st.markdown("### Outreach draft for this account (unsent)")
+            if "draft_edits" not in st.session_state:
+                st.session_state["draft_edits"] = {}
+            if "draft_approved" not in st.session_state:
+                st.session_state["draft_approved"] = {}
+            draft_key = f"draft_{chosen['name']}"
+            edited = st.text_area("Edit the draft", value=st.session_state["draft_edits"].get(
+                chosen["name"], chosen.get("draft", "")), height=180, key=draft_key)
+            st.session_state["draft_edits"][chosen["name"]] = edited
+            col_approve, col_status = st.columns([1, 3])
+            with col_approve:
+                if st.button("Approve draft", key=f"approve_{chosen['name']}"):
+                    st.session_state["draft_approved"][chosen["name"]] = True
+            with col_status:
+                if st.session_state["draft_approved"].get(chosen["name"]):
+                    st.success("Approved in this session — still unsent. Nothing has been sent to this company.")
+                else:
+                    st.caption("Not approved yet. Approval here only marks it ready for a human to send elsewhere.")
+            approved = [n for n, v in st.session_state["draft_approved"].items() if v]
+            if approved:
+                st.caption(f"Approved this session: {', '.join(approved)}")
 
     with tab_people:
         out = Path(st.session_state["out"])
@@ -159,12 +240,23 @@ if result:
         comps = _read_csv(out / "Competitive_Landscape.csv")
         st.markdown("### Competitors")
         if comps:
+            classes = {}
+            for c in comps:
+                classes[c.get("classification", "unknown")] = classes.get(c.get("classification", "unknown"), 0) + 1
+            st.bar_chart(classes)
             st.dataframe(comps, use_container_width=True, hide_index=True)
         else:
             st.write("No competitor records for this mission.")
 
     with tab_files:
         out = Path(st.session_state["out"])
+        with st.expander("Read the full report here"):
+            html_path = out / "Market_Entry_Report.html"
+            if html_path.exists():
+                import streamlit.components.v1 as components
+                components.html(html_path.read_text(encoding="utf-8"), height=700, scrolling=True)
+            else:
+                st.write("No HTML report in this mission output.")
         for name in result["artifacts"]:
             p = out / name
             if p.exists() and p.suffix in (".csv", ".json", ".html", ".pdf"):
