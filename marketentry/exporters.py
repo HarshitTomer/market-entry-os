@@ -67,12 +67,30 @@ def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
 
     (out / "Evidence_Log.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
 
-    # HTML report
+    # HTML report — dark, professional, matching the app. The old report
+    # was plain white with an unstyled table, which is why it looked bad.
+    def _fit_bar(score: int) -> str:
+        return (f"<div style='background:#334155;border-radius:999px;height:8px;width:110px'>"
+                f"<div style='background:#818cf8;border-radius:999px;height:8px;width:{score}%'></div></div>")
     rows_html = "".join(
-        f"<tr><td>{r['rank']}</td><td>{html.escape(r['company'].name)}</td>"
-        f"<td>{html.escape(r['company'].domain or 'unknown')}</td>"
-        f"<td>{r['fit_score']}</td><td>{r['coverage']}</td><td>{r['wave']}</td></tr>"
+        f"<tr><td>{r['rank']}</td><td><b>{html.escape(r['company'].name)}</b><br>"
+        f"<span class='small'>{html.escape(r['company'].domain or 'unknown')} · "
+        f"{html.escape(r['company'].industry or 'unknown')} · "
+        f"{r['company'].employee_count if r['company'].employee_count is not None else 'unknown'} people</span></td>"
+        f"<td>{_fit_bar(r['fit_score'])} {r['fit_score']}/100</td>"
+        f"<td>{r['coverage']}</td><td>{r['wave']}</td>"
+        f"<td>{html.escape('; '.join(r.get('signals', [])) or '—')}</td></tr>"
         for r in ranked)
+    buyers_html = "".join(
+        f"<tr><td>{html.escape(p.name)}</td><td>{html.escape(p.title or 'unknown')}</td>"
+        f"<td>{html.escape(p.company_name or 'unknown')}</td>"
+        f"<td>{'✓ verified role' if getattr(p, 'role_verified', False) else 'adjacent contact'}</td></tr>"
+        for p in buyers) or "<tr><td colspan='4'>None mapped — see warnings.</td></tr>"
+    comps_html = "".join(
+        f"<tr><td>{html.escape(c.get('name', ''))}</td><td>{html.escape(c.get('domain', '') or '—')}</td>"
+        f"<td>{html.escape(c.get('classification', ''))}</td>"
+        f"<td>{html.escape(c.get('industry', '') or '—')}</td></tr>"
+        for c in competitors) or "<tr><td colspan='4'>None found.</td></tr>"
     sizing_html = ""
     if sizing["serviceable_annual_pool"] is not None:
         sizing_html = (f"<p><b>Observed eligible company count:</b> {sizing['observed_eligible_company_count']} "
@@ -88,48 +106,61 @@ def write_artifacts(out: Path, mission_id, brief, ranked, buyers, competitors,
     warn_html = "".join(f"<li>{html.escape(w)}</li>" for w in warnings) or "<li>None</li>"
     mode_banner = ""
     if mode == "sample":
-        mode_banner = ("<p style='background:#fff3cd;padding:10px'><b>SAMPLE DATA — smoke test only.</b> "
+        mode_banner = ("<p class='banner'><b>SAMPLE DATA — smoke test only.</b> "
                        "These companies are not live Crustdata results. Run with a real "
                        "CRUSTDATA_API_KEY for a genuine mission.</p>")
     elif mode == "no_key":
-        mode_banner = ("<p style='background:#f8d7da;padding:10px'><b>NO LIVE DATA.</b> No Crustdata key was set, "
+        mode_banner = ("<p class='banner'><b>NO LIVE DATA.</b> No Crustdata key was set, "
                        "so no live search ran. This packet is empty by design, not by fabrication.</p>")
     decision_html = ""
     if decision:
         top5_html = "".join(f"<li>{html.escape(t['name'])} — fit {t['fit_score']}</li>" for t in decision["top5"])
         risks_html = "".join(f"<li>{html.escape(r)}</li>" for r in decision["risks"]) or "<li>None listed</li>"
         reasons_html = "".join(f"<li>{html.escape(r)}</li>" for r in decision["reasons"])
-        decision_html = (f"<div style='border:2px solid #333;padding:16px'>"
-                         f"<h2>Decision: {decision['verdict']} (confidence: {decision['confidence']})</h2>"
+        _pill = {"GO": "#14532d", "CONDITIONAL": "#78350f"}.get(decision['verdict'], "#7f1d1d")
+        decision_html = (f"<div class='card'>"
+                         f"<span class='pill' style='background:{_pill}'>{decision['verdict']}</span> "
+                         f"<span class='small'>confidence: {decision['confidence']}</span>"
                          f"<ul>{reasons_html}</ul><h3>Top 5 to contact first</h3><ol>{top5_html}</ol>"
                          f"<h3>Risks / what would change this verdict</h3><ul>{risks_html}</ul>"
-                         f"<p><small>Rule: {html.escape(decision['rule'])}</small></p></div>")
+                         f"<p class='small'>Rule: {html.escape(decision['rule'])}</p></div>")
     report = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>Market Entry Report — {html.escape(brief.product_name)}</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px}}
-table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #ccc;padding:6px;text-align:left}}</style>
+<style>body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;max-width:900px;margin:40px auto;padding:0 20px;line-height:1.55}}
+h1,h2,h3{{color:#f1f5f9;letter-spacing:-0.02em}}h1{{font-size:2rem}}
+.card{{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px;margin:20px 0}}
+.pill{{display:inline-block;padding:3px 14px;border-radius:999px;font-weight:650;font-size:0.9rem}}
+.small{{color:#94a3b8;font-size:0.9rem}}
+.banner{{background:#1e293b;border:1px solid #475569;border-radius:12px;padding:12px 16px}}
+table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #334155;padding:8px 10px;text-align:left}}
+th{{color:#94a3b8;font-size:0.9rem}}tr:nth-child(even) td{{background:#16213a}}
+a{{color:#a5b4fc}}</style>
 </head><body>
-<h1>Market Entry Report: {html.escape(brief.product_name)}</h1>
+<p class='small'>MARKETENTRYOS · MARKET ENTRY REPORT</p>
+<h1>{html.escape(brief.product_name)}</h1>
+<p class='small'>Target: {html.escape(brief.target_industry or 'unknown')} in {html.escape(brief.target_country or 'unknown')},
+{brief.employee_min or '?'}–{brief.employee_max or '?'} employees · Mission: {mission_id} · Mode: {mode}</p>
 {decision_html}
-<p><b>Product:</b> {html.escape(brief.product_description[:300])}</p>
-<p><b>Target:</b> {html.escape(brief.target_industry or 'unknown')} in {html.escape(brief.target_country or 'unknown')},
-{brief.employee_min or '?'}–{brief.employee_max or '?'} employees. Mission: {mission_id}. Mode: {mode}.</p>
+<div class='card'><h2>What you're selling</h2>
+<p>{html.escape(brief.product_description[:300])}</p></div>
 {mode_banner}
-<h2>Executive recommendation</h2>
-<p>Start with Wave 1 accounts (highest deterministic fit score, best evidence coverage),
-then Wave 2. Accounts in Research Needed need buyer or firmographic evidence before
-any outreach draft is used. No prospect was contacted: all outreach is an unsent local draft.</p>
-<h2>Bottom-up market sizing</h2>{sizing_html}
+<div class='card'><h2>Bottom-up market sizing</h2>{sizing_html}</div>
 <h2>Ranked target accounts</h2>
-<table><tr><th>Rank</th><th>Company</th><th>Domain</th><th>Fit / 100</th><th>Coverage</th><th>Wave</th></tr>{rows_html}</table>
+<table><tr><th>Rank</th><th>Company</th><th>Fit</th><th>Coverage</th><th>Wave</th><th>Why now</th></tr>{rows_html}</table>
+<p class='small'>Start with Wave 1 (highest fit, best evidence coverage), then Wave 2.
+Research Needed accounts need buyer or firmographic evidence before any draft is used.
+No prospect was contacted: all outreach is an unsent local draft.</p>
 <h2>Launch checklist (spec Step H)</h2>
 <p>Wave 1 — contact first, using the account-specific unsent draft in the CRM: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Wave 1') or 'none'}.</p>
 <p>Wave 2 — contact after Wave 1 replies: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Wave 2') or 'none'}.</p>
 <p>Research Needed — do not contact yet; resolve the unknowns in Target_Accounts.csv first: {', '.join(html.escape(r['company'].name) for r in ranked if r['wave'] == 'Research Needed') or 'none'}.</p>
 <p>Before any send: a human approves each draft, confirms the buyer's role, and checks the evidence log for that account. Nothing in this packet has been sent.</p>
-<h2>Competitors</h2><p>{len(competitors)} competitor records (see Competitive_Landscape.csv).
-Classifications are confirmed / possible / insufficient evidence — never stronger than the evidence.</p>
-<h2>Buyers</h2><p>{len(buyers)} verified buyers mapped (see Buyer_Map.csv). No email addresses are included.</p>
+<h2>People mapped</h2>
+<table><tr><th>Name</th><th>Title</th><th>Company</th><th>Status</th></tr>{buyers_html}</table>
+<p class='small'>No email addresses are included. Role-verified means the title matched the brief's buyer roles.</p>
+<h2>Competitors</h2>
+<table><tr><th>Name</th><th>Domain</th><th>Classification</th><th>Industry</th></tr>{comps_html}</table>
+<p class='small'>Classifications are confirmed / possible / insufficient evidence — never stronger than the evidence.</p>
 <h2>Assumptions, risks and warnings</h2><ul>{warn_html}</ul>
 <p>Limitations: Crustdata is company/person intelligence, not a complete registry of every
 business. Headcount, hiring and funding are indicators, not proof of purchase intent.
@@ -172,8 +203,13 @@ Sizing is an illustrative pool (observed count x client-supplied ACV), not valid
             [str(r["rank"]), r["company"].name, r["company"].domain or "unknown",
              str(r["fit_score"]), r["wave"]] for r in ranked]
         t = Table(table_data, repeatRows=1)
-        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
-                               ("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+                               ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                               ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
+                               ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                               ("TOPPADDING", (0, 0), (-1, -1), 5),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
         story += [t, Spacer(1, 6 * mm),
                   Paragraph("Warnings / unknowns: " + ("; ".join(warnings) if warnings else "None"),
                             styles["Normal"]),

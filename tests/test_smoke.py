@@ -68,6 +68,14 @@ def test_sample_mission_end_to_end(tmp_path):
     assert "SAMPLE" in (tmp_path / "Market_Entry_Report.html").read_text() or True
 
 
+def test_report_is_dark_and_includes_people_and_competitors(tmp_path):
+    result = run_mission(BRIEF, tmp_path / "rep", sample=True)
+    html_report = (tmp_path / "rep" / "Market_Entry_Report.html").read_text()
+    assert "#0f172a" in html_report
+    assert "Sample Buyer" in html_report
+    assert "Sample Competitor Ltd" in html_report
+
+
 def test_theme_is_dark_not_blinding_white():
     theme = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text()
     assert 'primaryColor = "#818cf8"' in theme

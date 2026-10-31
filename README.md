@@ -26,6 +26,22 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Loading that actually shows + a report that looks like a deliverable (v1.15, 31 Oct 2026)
+
+- **Loading, fixed properly:** the old progress card sat *below* the
+  search box and examples, so during a run you saw the landing page
+  with a small card at the bottom and thought it was stuck. Now
+  pressing Run (or Run again) first switches the whole main area to
+  a dedicated loading view — centred "Researching your market",
+  the 90-second expectation, the bar, the step row, elapsed seconds
+  — and nothing else competes with it until the result arrives.
+- **Report, rebuilt:** the old HTML report was plain white with an
+  unstyled table. It is now dark and professional, matching the app:
+  slate surfaces, verdict pill card, sizing card, fit-score bars in
+  the accounts table, a "why now" column, and — previously missing —
+  full People and Competitors tables instead of just counts. The PDF
+  gets an indigo header row and alternating rows instead of flat grey.
+
 ## Better loading (v1.14, 31 Oct 2026)
 
 The old progress bar stalled during the long loops — it only moved

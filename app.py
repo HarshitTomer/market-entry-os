@@ -105,6 +105,8 @@ if "menu_for" not in st.session_state:
     st.session_state["menu_for"] = None
 if "deleted_notice" not in st.session_state:
     st.session_state["deleted_notice"] = ""
+if "running_brief" not in st.session_state:
+    st.session_state["running_brief"] = None
 
 
 def _verdict_pill(verdict: str) -> str:
@@ -157,11 +159,17 @@ _STAGES = ["Understanding your market", "Finding companies in this market",
 
 
 def _run_with_progress(brief_text: str) -> tuple[dict, str]:
-    """Clean, visual progress: a card, a bar, and plain stage names.
-    No tool names, no API names, no logs, no background logic — just
-    what a founder would care to know: where the research is up to."""
+    """Full-screen loading, not a card buried under the search box.
+    Called from the dedicated loading view (see running_brief below),
+    so when a run starts the main area shows ONLY this: a centred
+    heading, a bar, and plain stage names. No tool names, no API names,
+    no logs, no background logic — just where the research is up to."""
     import time as _time
     _started = _time.time()
+    st.markdown("<br><br><h2 style='text-align:center;'>Researching your market</h2>",
+                unsafe_allow_html=True)
+    st.markdown("<p class='muted' style='text-align:center;'>This usually takes about 90 seconds for a live run.</p>",
+                unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown('<span class="loader-dot"></span><span class="loader-dot"></span>'
                     '<span class="loader-dot"></span> **Researching your market**',
@@ -321,6 +329,20 @@ if st.session_state.get("deleted_notice"):
     st.success(st.session_state["deleted_notice"])
     st.session_state["deleted_notice"] = ""
 
+# ---------------------------------------------------------------- loading view
+# The old bug: progress was rendered BELOW the search box and examples,
+# so during a run the user saw the landing page with a small card at
+# the bottom and thought loading was stuck. Now a run replaces the
+# whole main area with the loading view, at the top, on its own run.
+if st.session_state.get("running_brief"):
+    _brief_to_run = st.session_state["running_brief"]
+    _result, _out_dir = _run_with_progress(_brief_to_run)
+    st.session_state["result"] = _result
+    st.session_state["out"] = _out_dir
+    st.session_state["brief_text"] = _brief_to_run
+    st.session_state["running_brief"] = None
+    st.rerun()
+
 # ---------------------------------------------------------------- results
 result = st.session_state.get("result")
 if result:
@@ -337,9 +359,7 @@ if result:
     with _top2:
         if st.button("↻  Run again", use_container_width=True,
                      help="Re-run the same brief with fresh live data."):
-            _fresh, _fresh_out = _run_with_progress(brief_text)
-            st.session_state["result"] = _fresh
-            st.session_state["out"] = _fresh_out
+            st.session_state["running_brief"] = brief_text
             st.rerun()
     with _top3:
         if st.button("🗑  Delete this research", use_container_width=True):
@@ -465,8 +485,5 @@ if run:
     if not brief:
         st.error("Describe what you're selling and where you want to sell it, then run again.")
         st.stop()
-    result, _out_dir = _run_with_progress(brief)
-    st.session_state["result"] = result
-    st.session_state["out"] = _out_dir
-    st.session_state["brief_text"] = brief
+    st.session_state["running_brief"] = brief
     st.rerun()
