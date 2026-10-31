@@ -14,9 +14,12 @@ Run:  streamlit run app.py
 Setup: cp .env.example .env and put your Crustdata key in .env (local only).
 """
 import csv
+import html
+import io
 import json
 import os
 import sqlite3
+import zipfile
 from pathlib import Path
 
 import streamlit as st
@@ -36,10 +39,12 @@ st.set_page_config(page_title="MarketEntryOS", layout="wide",
 st.markdown("""
 <style>
   #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {visibility: hidden; height: 0;}
-  [data-testid="stSidebar"] {background: #f9fafb; border-right: 1px solid #e5e7eb;}
+  [data-testid="stSidebar"] {background: #f9fafb; border-right: 1px solid #e5e7eb;
+    min-width: 290px; max-width: 290px;}
   [data-testid="stSidebar"] .stButton button {
     text-align: left; background: transparent; border: none; color: #374151;
-    padding: 8px 12px; border-radius: 10px; font-size: 0.92rem; box-shadow: none;}
+    padding: 8px 12px; border-radius: 10px; font-size: 0.92rem; box-shadow: none;
+    white-space: normal; word-break: break-word; line-height: 1.35;}
   [data-testid="stSidebar"] .stButton button:hover {background: #eceef1; color: #111827;}
   .block-container {max-width: 760px; padding-top: 1.5rem; padding-bottom: 3rem;}
   h1, h2, h3 {font-weight: 650; letter-spacing: -0.02em; color: #111827;}
@@ -63,8 +68,6 @@ if "brief_text" not in st.session_state:
     st.session_state["brief_text"] = ""
 if "result" not in st.session_state:
     st.session_state["result"] = None
-if "sample" not in st.session_state:
-    st.session_state["sample"] = False
 if "confirm_delete" not in st.session_state:
     st.session_state["confirm_delete"] = None
 if "deleted_notice" not in st.session_state:
@@ -87,10 +90,34 @@ def _open_history_entry(entry: dict) -> bool:
     result_path = Path(entry["out_dir"]) / "mission_result.json"
     if not result_path.exists():
         return False
-    st.session_state["result"] = json.loads(result_path.read_text(encoding="utf-8"))
+    try:
+        st.session_state["result"] = json.loads(result_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
     st.session_state["out"] = entry["out_dir"]
     st.session_state["brief_text"] = entry.get("brief_text", "")
     return True
+
+
+def _display_brief(result: dict, brief_text: str) -> str:
+    """Never show raw JSON as the user's message. Older history entries
+    (guided builder) stored a JSON brief; show a plain summary instead."""
+    text = (brief_text or "").strip()
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+            parts = [data.get("product_name") or "Market entry"]
+            if data.get("target_industry"):
+                parts.append(data["target_industry"])
+            if data.get("target_country"):
+                parts.append(f"in {data['target_country']}")
+            return " · ".join(parts)
+        except Exception:
+            pass
+    if text:
+        return text
+    brief = result.get("brief", {})
+    return f"{brief.get('product_name', 'Market entry')} · {brief.get('target_industry', '')} in {brief.get('target_country', '')}".strip(" ·")
 
 
 # ---------------------------------------------------------------- sidebar
@@ -101,6 +128,14 @@ with st.sidebar:
         st.rerun()
     st.markdown("**Recent**")
     entries = load_history("outputs/streamlit-mission")
+    _q = st.text_input("Search recent", placeholder="Filter by product or country…",
+                       label_visibility="collapsed")
+    if _q:
+        _ql = _q.lower()
+        entries = [e for e in entries
+                   if _ql in (e.get("product_name") or "").lower()
+                   or _ql in (e.get("target_country") or "").lower()
+                   or _ql in (e.get("brief_text") or "").lower()]
     if not entries:
         st.markdown('<p class="muted">No past searches yet.</p>', unsafe_allow_html=True)
     for e in entries[:20]:
@@ -120,9 +155,8 @@ with st.sidebar:
                 st.session_state["confirm_delete_out"] = e["out_dir"]
                 st.rerun()
     st.markdown("---")
-    st.session_state["sample"] = st.checkbox(
-        "Sample mode", value=st.session_state["sample"],
-        help="Labelled smoke test, no API key. Off for a live run.")
+    st.checkbox("Sample mode", key="sample_mode",
+                help="Labelled smoke test, no API key. Off for a live run.")
     has_key = bool(os.environ.get("CRUSTDATA_API_KEY"))
     st.markdown(f"<p class='muted'>Live data: {'on' if has_key else 'off — add CRUSTDATA_API_KEY to .env'}</p>",
                 unsafe_allow_html=True)
@@ -160,15 +194,26 @@ if st.session_state.get("deleted_notice"):
 result = st.session_state.get("result")
 if result:
     brief_text = st.session_state.get("brief_text", "")
-    if brief_text:
-        st.markdown(f'<div class="user-msg">{brief_text}</div>', unsafe_allow_html=True)
-    _top1, _top2 = st.columns([1, 1])
+    _display = _display_brief(result, brief_text)
+    if _display:
+        st.markdown(f'<div class="user-msg">{html.escape(_display)}</div>', unsafe_allow_html=True)
+    _top1, _top2, _top3 = st.columns(3)
     with _top1:
         if st.button("↩  New search", use_container_width=True):
             st.session_state["result"] = None
             st.session_state["brief_text"] = ""
             st.rerun()
     with _top2:
+        if st.button("↻  Run again", use_container_width=True,
+                     help="Re-run the same brief with fresh live data."):
+            with st.spinner("Researching…"):
+                _fresh = run_mission(brief_text, "outputs/streamlit-mission",
+                                     api_key=os.environ.get("CRUSTDATA_API_KEY"),
+                                     sample=st.session_state.get("sample_mode", False))
+            st.session_state["result"] = _fresh
+            st.session_state["out"] = "outputs/streamlit-mission"
+            st.rerun()
+    with _top3:
         if st.button("🗑  Delete this research", use_container_width=True):
             st.session_state["confirm_delete"] = result["mission_id"]
             st.session_state["confirm_delete_out"] = st.session_state["out"]
@@ -229,10 +274,27 @@ if result:
             st.markdown("**Competitors**")
             st.dataframe(comps, use_container_width=True, hide_index=True)
         st.markdown("**Files**")
+        _zip_buf = io.BytesIO()
+        with zipfile.ZipFile(_zip_buf, "w", zipfile.ZIP_DEFLATED) as _zf:
+            for _p in sorted(out.iterdir()):
+                if _p.is_file() and _p.name != "history.json":
+                    _zf.write(_p, _p.name)
+        st.download_button("Download all as ZIP", _zip_buf.getvalue(),
+                           file_name=f"{result['mission_id']}.zip")
         for name in result["artifacts"]:
             p = out / name
             if p.exists() and p.suffix in (".csv", ".json", ".html", ".pdf"):
                 st.download_button(f"Download {name}", p.read_bytes(), file_name=name)
+        st.markdown("**Copyable summary**")
+        _top_lines = "\n".join(
+            f"- {t['rank']}. {t['name']} (fit {t['fit_score']})"
+            for t in (d.get("top5") or [])[:5]) or "No accounts found."
+        _pool = (f"{s['currency']} {s['serviceable_annual_pool']:,.0f}"
+                 if s["serviceable_annual_pool"] is not None else "not estimated")
+        st.code(f"Verdict: {d.get('verdict', '—')}\n"
+                f"Accounts: {len(result['ranked'])} · Market pool: {_pool} · "
+                f"People mapped: {result['buyer_records']}\nTop accounts:\n{_top_lines}",
+                language="text")
         st.markdown("**Warnings**")
         for w in result["warnings"]:
             st.write("•", w)
@@ -278,7 +340,7 @@ if run:
     with st.spinner("Researching…"):
         result = run_mission(brief, "outputs/streamlit-mission",
                              api_key=os.environ.get("CRUSTDATA_API_KEY"),
-                             sample=st.session_state["sample"])
+                             sample=st.session_state.get("sample_mode", False))
     st.session_state["result"] = result
     st.session_state["out"] = "outputs/streamlit-mission"
     st.session_state["brief_text"] = brief

@@ -26,6 +26,21 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## UI bug fixes + functionality (v1.10, 31 Oct 2026)
+
+- **Bugs fixed:** reopening an old guided-builder mission no longer
+  shows raw JSON as your message — it shows a plain summary
+  ("product · industry in country"); user messages are now HTML-
+  escaped; a corrupt history file no longer crashes the open;
+  sidebar buttons wrap instead of overflowing, at a fixed 290px
+  sidebar width; the sample-mode toggle no longer fights Streamlit
+  session state (it now has its own widget key).
+- **Functionality:** "↻ Run again" re-runs the same brief with fresh
+  live data; "Download all as ZIP" gives every file in one click;
+  a copyable text summary (verdict, pool, top 5) sits in Details
+  for pasting into a deck or message; sidebar recent searches are
+  now filterable by product or country.
+
 ## Interface, polished + delete (v1.9, 31 Oct 2026)
 
 - **Look:** tighter typography and spacing, a light-grey sidebar
