@@ -52,7 +52,9 @@ def test_docs_shape_ramp_brex():
          "headcount": {"total": 1200},
          "locations": {"headquarters": "San Francisco, United States"}}],
         "total_count": 84}
-    client = _client_with([_Resp(200, payload)])
+    # search_companies makes a second (keyword) call for hybrid candidates
+    # when an industry is present; it must not overwrite a real total.
+    client = _client_with([_Resp(200, payload), _Resp(200, {"companies": [], "total_count": 12})])
     brief = MarketBrief(target_country="United States", target_industry="Financial Services",
                         employee_min=500, employee_max=5000)
     companies, total, warns = client.search_companies(brief, limit=2)

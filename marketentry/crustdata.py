@@ -11,14 +11,30 @@ search docs, 31 Oct 2026):
     POST https://api.crustdata.com/web/enrich/live
 Headers: Authorization: Bearer <key>, x-api-version: 2025-11-01.
 
-Company search payload (public docs):
-    {"filters": {"op": "and", "conditions": [
-        {"field": "taxonomy.industry", "type": "=", "value": "Financial Services"},
-        {"field": "headcount.total", "type": "between", "value": [50, 500]},
-        {"field": "locations.country", "type": "=", "value": "United Kingdom"}]},
-     "limit": 20}
-Response: {"companies": [{"basic_info": {"name", "primary_domain"},
-"headcount": {"total"}, "locations": {"headquarters"}, ...}], "total_count": N}
+Company search payload (LIVE-VALIDATED 31 Oct 2026 against the real API,
+which differs from the public docs in three ways that would have broken
+a live demo):
+  1. 'between' is rejected. A headcount range is two conditions:
+     {"field": "headcount.total", "type": "=>", "value": 50} (at least) and
+     {"field": "headcount.total", "type": "=<", "value": 500} (at most).
+  2. 'taxonomy.industry' is an unsupported filter column. Industry is
+     matched by semantic search: {"search": {"query": "<industry> companies"}}
+     plus, for sizing, a description-keyword count search
+     (basic_info.description contains <keyword>). Both are labelled as
+     such in warnings; neither is presented as a taxonomy filter.
+  3. Semantic search returns total_count=None (cursor pagination), so
+     the sizing count comes from the keyword search, not the semantic one.
+Response: {"companies": [{"crustdata_company_id": 123, "basic_info":
+{"name", "primary_domain"}, "headcount": {"total"},
+"locations": {"country": "GBR", "headquarters": "..."},
+"taxonomy": {"professional_network_industry": "Financial Services"}}],
+"total_count": N | None, "next_cursor": "..."}
+Company enrich payload is plural and returns a list:
+  {"crustdata_company_ids": [123]} -> [{"matches": [{"confidence_score": 1.0,
+  "company_data": {...}}]}]. Enrich by ID, not domain, when an ID is known:
+  the same domain can match a different company record.
+Person search fields (live): experience.employment_details.current.company_website_domain,
+experience.employment_details.current.title, .company_name, .company_id.
 
 Robustness, by design:
 - Bounded retries with backoff on 429 / 5xx only; 4xx are returned as
@@ -48,6 +64,8 @@ API_VERSION = "2025-11-01"
 
 
 def _first(d: dict, *keys):
+    if not isinstance(d, dict):
+        return None
     for k in keys:
         v = d.get(k)
         if v is not None:
@@ -118,10 +136,19 @@ def normalize_company(raw: dict) -> Company:
     industry = ""
     tax = raw.get("taxonomy") or {}
     if isinstance(tax, dict):
-        industry = _first(tax, "industry") or ""
+        industry = _first(tax, "professional_network_industry", "industry") or ""
     if not industry:
         inds = _first(raw, "industry", "industries")
         industry = inds[0] if isinstance(inds, list) and inds else (inds or "")
+    if not industry and isinstance(basic.get("markets"), list) and basic["markets"]:
+        industry = str(basic["markets"][0])
+    # Country codes from locations.country (GBR, USA, ...) -> names, when
+    # the headquarters string is absent.
+    _COUNTRY_CODES = {"GBR": "United Kingdom", "USA": "United States",
+                      "IND": "India", "DEU": "Germany", "FRA": "France",
+                      "CAN": "Canada", "AUS": "Australia", "SGP": "Singapore"}
+    if country in _COUNTRY_CODES:
+        country = _COUNTRY_CODES[country]
     emp = _first(head, "total") or _first(raw, "employee_count", "headcount")
     if isinstance(emp, dict):
         emp = _first(emp, "total")
@@ -157,14 +184,26 @@ def normalize_company(raw: dict) -> Company:
 def normalize_person(raw: dict) -> Person:
     basic = raw.get("basic_profile") or raw.get("basic_info") or {}
     exp = raw.get("experience") or {}
-    cur = exp.get("current") or raw.get("current") or {}
+    # Live shape: experience.employment_details.current.{title,company_name,
+    # company_website_domain,company_id}. basic_profile.current_title can
+    # be stale / from a different employer, so employment_details wins.
+    emp = exp.get("employment_details") or {}
+    cur_raw = emp.get("current") or exp.get("current") or raw.get("current") or {}
+    # Live shape: employment_details.current is a LIST of current jobs.
+    cur = cur_raw[0] if isinstance(cur_raw, list) and cur_raw else (cur_raw if isinstance(cur_raw, dict) else {})
     name = _first(basic, "name") or _first(raw, "name") or "Unknown person"
-    title = _first(basic, "current_title") or _first(cur, "title") or _first(raw, "title") or ""
-    comp = _first(cur, "name") or _first(raw, "company_name") or ""
-    dom = _first(cur, "domain") or _first(raw, "company_domain") or ""
-    pid = str(_first(raw, "person_id", "id", "profile_id") or name)
-    return Person(person_id=pid, name=str(name), title=str(title),
-                  company_name=str(comp), company_domain=str(dom).lower(), raw=raw)
+    title = _first(cur, "title") or _first(basic, "current_title") or _first(raw, "title") or ""
+    comp = _first(cur, "company_name") or _first(cur, "name") or _first(raw, "company_name") or ""
+    dom = _first(cur, "company_website_domain") or ""
+    if not dom:
+        doms = _first(cur, "company_domains") or []
+        dom = doms[0] if isinstance(doms, list) and doms else ""
+    dom = dom or _first(cur, "domain") or _first(raw, "company_domain") or ""
+    pid = str(_first(raw, "crustdata_person_id", "person_id", "id", "profile_id") or name)
+    person = Person(person_id=pid, name=str(name), title=str(title),
+                    company_name=str(comp), company_domain=str(dom).lower(), raw=raw)
+    person.company_id = str(_first(cur, "company_id") or "")
+    return person
 
 
 class CrustdataClient:
@@ -191,14 +230,17 @@ class CrustdataClient:
             self.trace.append(call)
             return None, call
         last_err = ""
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 resp = self.session.post(
                     f"{BASE_URL}{path}", json=payload,
                     headers=self._headers(), timeout=30)
                 ms = int((time.time() - started) * 1000)
-                if resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                    time.sleep(2 ** attempt)
+                if resp.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+                    # Enrich is rate-limited in bursts live (31 Oct 2026):
+                    # back off longer than the default, or the demo hits
+                    # a wall of 429s on the first 10 enrichments.
+                    time.sleep(2 ** (attempt + 1))
                     continue
                 if resp.status_code >= 400:
                     call = ToolCall(tool, path, "error", ms,
@@ -219,26 +261,36 @@ class CrustdataClient:
         return None, call
 
     # -- Company ---------------------------------------------------------
+    def _industry_keyword(self, brief) -> str:
+        text = ((brief.product_description or "") + " " + (brief.target_industry or "")).lower()
+        if "fintech" in text or "financial technology" in text:
+            return "fintech"
+        if brief.target_industry:
+            return brief.target_industry.split()[0].lower()
+        return ""
+
     def search_companies(self, brief, limit: int = 20) -> tuple[list[Company], int | None, list[str]]:
-        """Returns (companies, total_count, warnings). Post-filters locally
-        on country / headcount, because the provider may not support every
-        filter combination — a filter the API ignores is not silently
+        """Returns (companies, total_count, warnings). Live-validated flow:
+        (a) semantic search for industry relevance, with country + headcount
+        filters; (b) a description-keyword search for a sizing count, because
+        semantic search returns total_count=None. Post-filters locally on
+        country / headcount. A filter the API ignores is never silently
         treated as applied."""
         conditions = []
-        if brief.target_industry:
-            conditions.append({"field": "taxonomy.industry", "type": "=", "value": brief.target_industry})
         if brief.employee_min is not None and brief.employee_max is not None:
-            conditions.append({"field": "headcount.total", "type": "between",
-                               "value": [brief.employee_min, brief.employee_max]})
+            conditions.append({"field": "headcount.total", "type": "=>", "value": brief.employee_min})
+            conditions.append({"field": "headcount.total", "type": "=<", "value": brief.employee_max})
         elif brief.employee_min is not None:
-            conditions.append({"field": "headcount.total", "type": ">=", "value": brief.employee_min})
+            conditions.append({"field": "headcount.total", "type": "=>", "value": brief.employee_min})
         if brief.target_country:
             conditions.append({"field": "locations.country", "type": "=", "value": brief.target_country})
-        payload = {"filters": {"op": "and", "conditions": conditions}, "limit": limit}
-        data, call = self._post("company_search", "/company/search", payload)
         warnings: list[str] = []
+        payload: dict = {"filters": {"op": "and", "conditions": conditions}, "limit": limit}
+        if brief.target_industry:
+            payload["search"] = {"query": f"{brief.target_industry} companies"}
+            warnings.append("Industry matched by semantic search (live API rejects taxonomy.industry as a filter column); relevance is therefore semantic, not a taxonomy guarantee.")
+        data, call = self._post("company_search", "/company/search", payload)
         if data is None:
-            # One screener-style fallback, logged as its own tool call.
             fb = {"filters": [], "limit": limit}
             data, call = self._post("company_search", "/screener/company/search/", fb)
             if data is None:
@@ -247,6 +299,26 @@ class CrustdataClient:
             warnings.append("Primary company search endpoint unavailable; used screener fallback (filters applied locally).")
         raw_list = data.get("companies") or data.get("data") or data.get("results") or []
         total = data.get("total_count")
+        # Hybrid candidates + sizing count: semantic results are loose
+        # (e.g. "Software Development" for a fintech brief), so also pull
+        # description-keyword matches with the same filters, merge by
+        # canonical ID, and use the keyword total for sizing. Semantic
+        # total is None, so it cannot size the market.
+        if brief.target_industry:
+            kw = self._industry_keyword(brief)
+            if kw:
+                kw_conditions = conditions + [{"field": "basic_info.description", "type": "contains", "value": kw}]
+                kw_data, _ = self._post("company_search_count", "/company/search",
+                                        {"filters": {"op": "and", "conditions": kw_conditions}, "limit": limit})
+                if kw_data:
+                    if total is None and kw_data.get("total_count") is not None:
+                        total = kw_data["total_count"]
+                        warnings.append(f"Sizing count is the description-keyword observed count ('{kw}' in company description, country + headcount scoped) — coverage-limited, not every business in the market.")
+                    seen = {str(r.get("crustdata_company_id")) for r in raw_list if isinstance(r, dict)}
+                    for r in kw_data.get("companies", []):
+                        if str(r.get("crustdata_company_id")) not in seen:
+                            raw_list.append(r)
+                            seen.add(str(r.get("crustdata_company_id")))
         companies = [normalize_company(r) for r in raw_list if isinstance(r, dict)]
         # Local post-filter: only keep what we can verify matches the brief.
         # Headcount unknown is kept (unknown != out of range) and flagged.
@@ -266,19 +338,42 @@ class CrustdataClient:
         return filtered, total, warnings
 
     def enrich_company(self, company: Company) -> Company | None:
-        payload = {"domain": company.domain} if company.domain else {"company_id": company.company_id}
+        # Enrich by ID when known (live-validated: the same domain can
+        # match a different company record). Payload is plural, response
+        # is a list of {matches: [{confidence_score, company_data}]}.
+        try:
+            cid = int(company.company_id)
+            payload: dict = {"crustdata_company_ids": [cid]}
+        except (TypeError, ValueError):
+            if not company.domain:
+                return None
+            payload = {"domains": [company.domain]}
         data, _ = self._post("company_enrich", "/company/enrich", payload)
         if not data:
             return None
-        raw = data.get("company") or data
-        enriched = normalize_company(raw if isinstance(raw, dict) else {})
-        # Merge: enriched fields win where present, search fields fill gaps.
+        items = data if isinstance(data, list) else [data]
+        best = None
+        best_conf = -1.0
+        for item in items:
+            for m in (item.get("matches") or []):
+                conf = m.get("confidence_score") or 0
+                rec = m.get("company_data") or {}
+                if str(rec.get("crustdata_company_id")) == str(company.company_id):
+                    best, best_conf = rec, 2.0
+                    break
+                if conf > best_conf:
+                    best, best_conf = rec, conf
+            if best_conf == 2.0:
+                break
+        if best is None:
+            return None
+        enriched = normalize_company(best)
         for attr in ("name", "domain", "country", "industry", "employee_count",
                      "headcount_growth", "open_roles", "funding_usd", "description"):
             if getattr(enriched, attr) in (None, "", 0) and getattr(company, attr) not in (None, ""):
                 setattr(enriched, attr, getattr(company, attr))
         enriched.company_id = company.company_id
-        enriched.raw = raw
+        enriched.raw = best
         return enriched
 
     def identify_company(self, name_or_domain: str) -> Company | None:
@@ -294,14 +389,20 @@ class CrustdataClient:
         warnings: list[str] = []
         conditions = []
         if company.domain:
-            conditions.append({"field": "current.company_domain", "type": "=", "value": company.domain})
-        payload = {"filters": {"op": "and", "conditions": conditions}, "limit": limit}
+            # Live field name; the domain filter matches all employers in
+            # the record, so the local employer check below (current
+            # employer only) is what actually verifies the match.
+            conditions.append({"field": "experience.employment_details.current.company_website_domain",
+                               "type": "=", "value": company.domain})
+        # Fetch more than we keep: domain matching is loose, so most
+        # returned profiles are filtered out locally as non-current.
+        fetch_limit = max(limit * 5, 10)
+        payload = {"filters": {"op": "and", "conditions": conditions}, "limit": fetch_limit}
         data, call = self._post("person_search", "/person/search", payload)
         if data is None:
-            # Screener fallback: company-scoped search, titles post-filtered.
             fb = {"filters": [{"filter_type": "CURRENT_COMPANY", "type": "in",
                                 "value": [company.domain]}] if company.domain else [],
-                  "limit": limit}
+                  "limit": fetch_limit}
             data, call = self._post("person_search", "/screener/person/search/", fb)
             if data is None:
                 warnings.append(f"Person search failed for {company.name}: {call.detail}")
@@ -309,20 +410,14 @@ class CrustdataClient:
             warnings.append("Person search used screener fallback; titles post-filtered locally.")
         raw_list = data.get("profiles") or data.get("people") or data.get("data") or data.get("results") or []
         people = [normalize_person(r) for r in raw_list if isinstance(r, dict)]
-        # Verify employer + role locally: a person counts as a buyer only if
-        # their employer matches this account (domain or name) and their
-        # title matches a target role (or, if no title match, they are kept
-        # but flagged unverified_role — never silently promoted).
         verified: list[Person] = []
         for p in people:
             employer_ok = (not company.domain or p.company_domain == company.domain
-                           or (p.company_name and p.company_name.lower() == company.name.lower())
-                           or not p.company_name)
+                           or (p.company_name and p.company_name.lower() == company.name.lower()))
             if not employer_ok:
                 continue
-            p.company_id = company.company_id
-            if company.domain and not p.company_domain:
-                p.company_domain = company.domain
+            if not p.company_id:
+                p.company_id = company.company_id
             verified.append(p)
         role_words = [r.lower() for r in roles]
         if not role_words:
@@ -335,17 +430,24 @@ class CrustdataClient:
         return matched, warnings
 
     def enrich_person(self, person: Person) -> Person | None:
-        """Only called when the search record carries a profile URL / id
-        the enrich endpoint accepts. Otherwise returns None — no fake
-        profile is constructed."""
-        raw = person.raw
-        url = raw.get("profile_url") or raw.get("linkedin_url") or raw.get("url")
-        payload = {"profile_url": url} if url else {"person_id": person.person_id}
+        """Best effort, plural-ID shape like company enrich. Untested
+        against the live person-enrich endpoint; a failure returns None
+        and the search record stands (mission handles that)."""
+        try:
+            pid = int(person.person_id)
+            payload: dict = {"crustdata_person_ids": [pid]}
+        except (TypeError, ValueError):
+            return None
         data, _ = self._post("person_enrich", "/person/enrich", payload)
         if not data:
             return None
-        rec = data.get("person") or data
-        return normalize_person(rec) if isinstance(rec, dict) else None
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            for m in (item.get("matches") or []):
+                rec = m.get("person_data") or m.get("company_data") or {}
+                if rec:
+                    return normalize_person(rec)
+        return None
 
     # -- Web -------------------------------------------------------------
     def web_search(self, query: str, limit: int = 5) -> list[dict]:

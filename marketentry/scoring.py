@@ -35,10 +35,17 @@ def score_company(c: Company, brief: MarketBrief, buyer_count: int = 0,
     total_fields = 5  # industry, headcount, growth, roles, funding
 
     # ICP: industry (20) + headcount in range (15)
+    # Partial credit (10) for a shared industry token, e.g. "financial"
+    # shared by "Financial technology" and "Financial Services"/"Banking"
+    # adjacent sectors — live taxonomy is professional_network_industry,
+    # not a clean target-industry label, so exact-only scoring would
+    # unfairly zero every real fintech-adjacent company.
     if c.industry:
         observed_fields += 1
         if brief.target_industry and brief.target_industry.lower() in c.industry.lower():
             score += 20
+        elif brief.target_industry and set(brief.target_industry.lower().split()) & set(c.industry.lower().split()):
+            score += 10
         elif not brief.target_industry:
             score += 10
     else:

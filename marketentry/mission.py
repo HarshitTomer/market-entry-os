@@ -97,6 +97,11 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
             continue
         if mode != "live":
             break
+        if enriched:
+            # Space enrich calls: the live enrich endpoint rate-limits
+            # bursts (31 Oct 2026 live run: first 7 back-to-back calls 429'd).
+            import time as _time
+            _time.sleep(1.0)
         got = client.enrich_company(c)
         enriched.append(got or c)
         if got is None:
@@ -183,8 +188,11 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     # Step C (scoring, after buyers so buyer availability counts)
     ranked = []
     for c in enriched:
-        kw_overlap = bool(brief.competitor_keywords and c.industry
-                          and brief.target_industry.lower() in c.industry.lower())
+        desc = (c.description or "").lower()
+        kw_overlap = bool(
+            (c.industry and brief.target_industry.lower() in c.industry.lower())
+            or ("fintech" in desc and "fintech" in brief.target_industry.lower())
+            or (brief.target_industry and brief.target_industry.split()[0].lower() in desc))
         score, coverage, unknowns = score_company(
             c, brief, buyer_count=buyer_counts.get(c.company_id, 0),
             keyword_overlap=kw_overlap)
@@ -238,6 +246,7 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
     conn.commit()
     conn.close()
 
+    warnings = list(dict.fromkeys(warnings))  # competitor step re-adds the same industry/sizing notes
     artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace)
     verified = sum(1 for e in evidence if e["status"] == "supported")
     result = {

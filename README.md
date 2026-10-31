@@ -26,6 +26,30 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Live-validated against the real Crustdata API (v1.2, 31 Oct 2026)
+
+The public docs and the live API differ, and v1.2 is fixed for the live
+one — this was found by a real run, not by reading docs:
+
+- Headcount ranges use `=>` / `=<`, not `between` (rejected live).
+- `taxonomy.industry` is not a filter column. Industry is matched by
+  semantic search (`{"search": {"query": "<industry> companies"}}`) plus a
+  description-keyword search for sizing. Semantic search returns
+  `total_count: null`, so sizing uses the keyword count (e.g. UK fintech
+  50–500: 195 companies × £12,000 = £2,340,000 serviceable pool).
+- Company enrich is plural (`{"crustdata_company_ids": [...]}`) and
+  returns a list of matches. Enrich by ID, not domain — the same domain
+  matched a different company record live.
+- Person search fields are
+  `experience.employment_details.current.company_website_domain` /
+  `.title`, and `current` is a list. Domain matching is loose, so the
+  current employer is verified locally.
+- Enrich is burst rate-limited live: calls are spaced 1s apart and
+  retried with backoff, or the first 10 enrichments 429.
+
+Live run (spec brief, 10 accounts): 10 accounts, 8 buyers, 12 competitors,
+all enrichments succeeding after the fix, sizing as above.
+
 ## Also included (v1.1)
 
 - FastAPI surface (`marketentry/api.py`, `uvicorn marketentry.api:app`):
