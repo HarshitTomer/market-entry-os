@@ -1,4 +1,7 @@
 requests>=2.31
 streamlit>=1.36
 python-dotenv>=1.0
+reportlab>=4.0
+fastapi>=0.110
+uvicorn>=0.29
 pytest>=8.0

@@ -133,6 +133,22 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
                             "company_id": "sample-comp", "industry": brief.target_industry,
                             "employee_count": 250, "classification": "possible competitor",
                             "evidence": "Sample data (smoke test only)"})
+    # Enrich competitors (bounded) and upgrade classification only on
+    # observed evidence: enriched industry matching the target industry
+    # with a known domain => confirmed; otherwise it stays possible.
+    if mode == "live":
+        for comp in competitors:
+            if not comp.get("domain"):
+                continue
+            probe = Company(company_id=comp["company_id"] or comp["domain"],
+                            name=comp["name"], domain=comp["domain"])
+            got = client.enrich_company(probe)
+            if got:
+                comp["industry"] = got.industry or comp["industry"]
+                comp["employee_count"] = got.employee_count if got.employee_count is not None else comp["employee_count"]
+                if brief.target_industry and got.industry and brief.target_industry.lower() in got.industry.lower():
+                    comp["classification"] = "confirmed competitor"
+                    comp["evidence"] += " + Crustdata company enrich (industry match observed)"
 
     # Step E: buyers for top 5 accounts
     buyers: list[Person] = []
@@ -154,6 +170,15 @@ def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None
         buyers.extend(kept); buyer_counts[c.company_id] = len(kept)
         if not kept:
             warnings.append(f"No verified buyer found for {c.name}: marked buyer_not_found, no name fabricated.")
+
+    # Buyer enrich (best effort, only where the record supports it).
+    if mode == "live":
+        enriched_buyers: list[Person] = []
+        for p in buyers[:3]:
+            got = client.enrich_person(p)
+            enriched_buyers.append(got or p)
+        if enriched_buyers:
+            buyers[:len(enriched_buyers)] = enriched_buyers
 
     # Step C (scoring, after buyers so buyer availability counts)
     ranked = []

@@ -10,9 +10,10 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 
 ## What you get from one run
 
-1. `Market_Entry_Report.html` — executive recommendation, sizing with the
-   formula shown, ranked accounts, assumptions and risks. Prints cleanly to
-   PDF from a browser (the spec's accepted PDF fallback).
+1. `Market_Entry_Report.pdf` **and** `Market_Entry_Report.html` — executive
+   recommendation, sizing with the formula shown, ranked accounts, assumptions
+   and risks. PDF is generated with reportlab when installed; HTML is always
+   written as a fallback.
 2. `Target_Accounts.csv` — de-duplicated accounts with Crustdata company ID,
    domain, country, industry, size, fit score, coverage, wave and verification
    status.
@@ -24,6 +25,20 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
    verification status. Missing data is `unknown`, not invented.
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
+
+## Also included (v1.1)
+
+- FastAPI surface (`marketentry/api.py`, `uvicorn marketentry.api:app`):
+  `POST /missions`, `GET /missions/{id}/accounts`, `/evidence`, `/artifacts/{name}`.
+- Competitor enrichment: a competitor is only upgraded to "confirmed" when an
+  enrich call observes an industry match; otherwise it stays "possible".
+- Buyer enrich where the search record supports it; otherwise the search
+  record stands, marked as-is.
+- `docs/demo_briefs.md` — 3 unseen briefs + 1 edge case judges can paste in,
+  with what to check for each. `docs/submission_checklist.md` — freeze checklist.
+- Tests: 9 passing (`pytest tests/ -q`), including mocked real Crustdata
+  response shapes (Ramp/Brex docs example), empty results, 429-retry, and
+  401-as-error-not-fake-data.
 
 ## Quick start
 

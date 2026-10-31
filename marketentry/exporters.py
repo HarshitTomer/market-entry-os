@@ -108,6 +108,46 @@ Sizing is an illustrative pool (observed count x client-supplied ACV), not valid
 <p>Every claim in this report traces to Evidence_Log.json. Missing data is marked unknown.</p>
 </body></html>"""
     (out / "Market_Entry_Report.html").write_text(report, encoding="utf-8")
-    return ["Market_Entry_Report.html", "Target_Accounts.csv", "Buyer_Map.csv",
-            "Competitive_Landscape.csv", "Evidence_Log.json", "marketentry.db",
-            "mission_result.json"]
+    artifacts = ["Market_Entry_Report.html", "Target_Accounts.csv", "Buyer_Map.csv",
+                 "Competitive_Landscape.csv", "Evidence_Log.json", "marketentry.db",
+                 "mission_result.json"]
+    # PDF when reportlab is installed (it is in requirements.txt). HTML is
+    # always written, so a missing PDF library never blocks the mission.
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib import colors
+        styles = getSampleStyleSheet()
+        story = [Paragraph(f"Market Entry Report: {brief.product_name}", styles["Title"]),
+                 Paragraph(f"Target: {brief.target_industry or 'unknown'} in "
+                           f"{brief.target_country or 'unknown'}, "
+                           f"{brief.employee_min or '?'}–{brief.employee_max or '?'} employees. "
+                           f"Mission: {mission_id}. Mode: {mode}.", styles["Normal"]),
+                 Spacer(1, 6 * mm)]
+        if sizing["serviceable_annual_pool"] is not None:
+            story.append(Paragraph(
+                f"Sizing: observed count {sizing['observed_eligible_company_count']} x "
+                f"client-supplied ACV {sizing['currency']} {sizing['annual_contract_value']:,.0f} = "
+                f"{sizing['currency']} {sizing['serviceable_annual_pool']:,.0f} serviceable pool "
+                f"(coverage-limited, illustrative — not TAM or forecast revenue).", styles["Normal"]))
+        else:
+            story.append(Paragraph("Monetary estimates omitted: no ACV supplied.", styles["Normal"]))
+        story.append(Spacer(1, 6 * mm))
+        table_data = [["Rank", "Company", "Domain", "Fit", "Wave"]] + [
+            [str(r["rank"]), r["company"].name, r["company"].domain or "unknown",
+             str(r["fit_score"]), r["wave"]] for r in ranked]
+        t = Table(table_data, repeatRows=1)
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+                               ("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
+        story += [t, Spacer(1, 6 * mm),
+                  Paragraph("Warnings / unknowns: " + ("; ".join(warnings) if warnings else "None"),
+                            styles["Normal"]),
+                  Paragraph("No prospect was contacted. Outreach is an unsent local draft. "
+                            "Every claim traces to Evidence_Log.json.", styles["Normal"])]
+        SimpleDocTemplate(str(out / "Market_Entry_Report.pdf"), pagesize=A4).build(story)
+        artifacts.insert(1, "Market_Entry_Report.pdf")
+    except Exception:
+        pass
+    return artifacts

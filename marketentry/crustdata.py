@@ -334,6 +334,19 @@ class CrustdataClient:
                    if any(w in p.title.lower() for w in role_words) or not p.title]
         return matched, warnings
 
+    def enrich_person(self, person: Person) -> Person | None:
+        """Only called when the search record carries a profile URL / id
+        the enrich endpoint accepts. Otherwise returns None — no fake
+        profile is constructed."""
+        raw = person.raw
+        url = raw.get("profile_url") or raw.get("linkedin_url") or raw.get("url")
+        payload = {"profile_url": url} if url else {"person_id": person.person_id}
+        data, _ = self._post("person_enrich", "/person/enrich", payload)
+        if not data:
+            return None
+        rec = data.get("person") or data
+        return normalize_person(rec) if isinstance(rec, dict) else None
+
     # -- Web -------------------------------------------------------------
     def web_search(self, query: str, limit: int = 5) -> list[dict]:
         data, _ = self._post("web_search", "/web/search/live", {"query": query, "limit": limit})

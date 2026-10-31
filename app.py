@@ -52,9 +52,16 @@ if not result:
 tab1, tab2, tab3, tab4 = st.tabs(["Market Intelligence", "Live Execution Trace", "Deliverables", "CRM"])
 with tab1:
     st.subheader("Bottom-up sizing (observed count × client-supplied ACV — never invented)")
-    st.json(result["sizing"])
+    s = result["sizing"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Observed companies", s["observed_eligible_company_count"] or "unknown")
+    c2.metric("Serviceable pool", f"{s['currency']} {s['serviceable_annual_pool']:,.0f}" if s["serviceable_annual_pool"] is not None else "omitted (no ACV)")
+    c3.metric("Shortlist pipeline", f"{s['currency']} {s['shortlist_pipeline_pool']:,.0f}" if s["shortlist_pipeline_pool"] is not None else "omitted (no ACV)")
+    st.json(s)
     st.subheader("Ranked target accounts")
     st.dataframe(result["ranked"], use_container_width=True)
+    if result["ranked"]:
+        st.bar_chart({r["name"]: r["fit_score"] for r in result["ranked"]})
 with tab2:
     st.subheader("Actual tool calls (trace)")
     st.dataframe(result["trace"], use_container_width=True)
@@ -65,7 +72,7 @@ with tab3:
     out = Path(st.session_state["out"])
     for name in result["artifacts"]:
         p = out / name
-        if p.exists() and p.suffix in (".csv", ".json", ".html"):
+        if p.exists() and p.suffix in (".csv", ".json", ".html", ".pdf"):
             st.download_button(f"Download {name}", p.read_bytes(), file_name=name)
 with tab4:
     db = Path(st.session_state["out"]) / "marketentry.db"
