@@ -26,6 +26,17 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Interface (v1.5, 31 Oct 2026)
+
+Search-first, not dashboard-first. The front page is one large text
+box — describe a market to enter — with three example searches
+underneath and filters hidden in a "Refine" expander, not a sidebar.
+No tagline header, no banners. After a run, the workflow is explicit:
+Ask → Research → Decide → Act. The decision card comes first, then
+Overview (sizing + ACV scenario), Accounts (with unsent drafts),
+People & competitors, and Files & CRM (downloads, trace, warnings).
+The audit trail is still there, one level down, not on the front page.
+
 ## Audit fixes (v1.4, 31 Oct 2026)
 
 Found by re-reading the live results, not by reading docs:
