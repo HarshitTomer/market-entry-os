@@ -26,6 +26,29 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## Colour, ⋮ menus, and the "folder is gone" fix (v1.12, 31 Oct 2026)
+
+- **Colour:** a real Streamlit theme (`.streamlit/config.toml`) —
+  one indigo accent for primary buttons, progress bar and links,
+  neutral grey everywhere else, instead of Streamlit's default red
+  clashing with the verdict pills. Progress bar and step colours
+  match the theme.
+- **Delete via ⋮:** each Recent chat now has a "⋮" button beside it,
+  like ChatGPT. Tap it and that chat alone shows Delete / Close.
+  The old "Manage past searches" expander is gone. Delete still
+  asks once, then deletes files + history entry.
+- **"Output folder is gone" — root cause fixed:** every Streamlit
+  mission used to share one folder, `outputs/streamlit-mission`, so
+  each new run overwrote the last mission's result, and deleting one
+  mission deleted the folder *every* history entry pointed at. Now
+  each mission gets its own folder
+  (`outputs/streamlit-mission/mission_<id>/`), history is unified at
+  `outputs/history.json` for CLI and UI alike, opening a past search
+  checks the folder's mission_id actually matches, and a stale entry
+  (from the old shared-folder era, or a folder deleted outside the
+  app) is removed from the list with a plain explanation instead of
+  leaving a permanently dead button.
+
 ## Visual progress, no background logic (v1.11, 31 Oct 2026)
 
 The old spinner ("Researching…") told you nothing for 90 seconds.

@@ -41,3 +41,22 @@ def test_delete_mission_removes_folder_and_entry(tmp_path):
     (other / "mission_result.json").write_text('{"mission_id": "x"}', encoding="utf-8")
     assert delete_mission(other, "x") is False
     assert other.exists()
+
+
+def test_per_mission_folders_do_not_overwrite_each_other(tmp_path):
+    """Regression for 'output folder is gone': two missions in two
+    subfolders must both stay openable, and both must share one
+    history file under outputs/."""
+    from marketentry.history import history_path_for
+    out1 = tmp_path / "outputs" / "streamlit-mission" / "mission_aaa"
+    out2 = tmp_path / "outputs" / "streamlit-mission" / "mission_bbb"
+    r1 = run_mission(BRIEF, out1, sample=True)
+    r2 = run_mission(BRIEF, out2, sample=True)
+    assert r1["mission_id"] != r2["mission_id"]
+    assert history_path_for(out1) == history_path_for(out2) == tmp_path / "outputs" / "history.json"
+    entries = load_history(out1)
+    assert {e["mission_id"] for e in entries} == {r1["mission_id"], r2["mission_id"]}
+    # Deleting one must not touch the other.
+    assert delete_mission(out1, r1["mission_id"]) is True
+    assert not out1.exists() and out2.exists()
+    assert [e["mission_id"] for e in load_history(out2)] == [r2["mission_id"]]

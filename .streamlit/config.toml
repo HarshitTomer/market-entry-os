@@ -1,0 +1,8 @@
+[theme]
+# One restrained accent everywhere (primary buttons, progress bar, links),
+# instead of Streamlit's default red. Everything else is neutral grey.
+primaryColor = "#4f46e5"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f9fafb"
+textColor = "#111827"
+font = "sans serif"

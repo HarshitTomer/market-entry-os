@@ -30,7 +30,7 @@ try:
 except Exception:
     pass
 
-from marketentry.history import delete_mission, load_history
+from marketentry.history import delete_mission, load_history, remove_entry
 from marketentry.mission import run_mission
 
 st.set_page_config(page_title="MarketEntryOS", layout="wide",
@@ -61,9 +61,9 @@ st.markdown("""
   .stButton button {border-radius: 999px;}
   [data-testid="stMetric"] {background: #ffffff; border: 1px solid #e5e7eb;
     border-radius: 16px; padding: 14px 16px;}
-  [data-testid="stProgress"] > div > div {background-color: #111827;}
-  .step-done {color: #111827; font-weight: 600;}
-  .step-now {color: #111827; font-weight: 700; text-decoration: underline;
+  [data-testid="stProgress"] > div > div {background-color: #4f46e5;}
+  .step-done {color: #374151; font-weight: 600;}
+  .step-now {color: #4f46e5; font-weight: 700; text-decoration: underline;
     text-underline-offset: 4px;}
   .step-next {color: #9ca3af;}
 </style>
@@ -75,6 +75,8 @@ if "result" not in st.session_state:
     st.session_state["result"] = None
 if "confirm_delete" not in st.session_state:
     st.session_state["confirm_delete"] = None
+if "menu_for" not in st.session_state:
+    st.session_state["menu_for"] = None
 if "deleted_notice" not in st.session_state:
     st.session_state["deleted_notice"] = ""
 
@@ -92,16 +94,34 @@ def _read_csv(path: Path):
 
 
 def _open_history_entry(entry: dict) -> bool:
+    """Open only if the folder's result is actually this mission's.
+
+    Root cause of 'output folder is gone': every Streamlit mission used
+    to share one folder, outputs/streamlit-mission, so each new run
+    overwrote the previous mission's result, and deleting one mission
+    deleted the folder every history entry pointed at. New missions get
+    their own folder (see _run_with_progress), and this check stops a
+    stale/overwritten entry from silently opening the wrong mission."""
     result_path = Path(entry["out_dir"]) / "mission_result.json"
     if not result_path.exists():
         return False
     try:
-        st.session_state["result"] = json.loads(result_path.read_text(encoding="utf-8"))
+        data = json.loads(result_path.read_text(encoding="utf-8"))
     except Exception:
         return False
+    if data.get("mission_id") != entry.get("mission_id"):
+        return False
+    st.session_state["result"] = data
     st.session_state["out"] = entry["out_dir"]
     st.session_state["brief_text"] = entry.get("brief_text", "")
     return True
+
+
+def _new_mission_dir() -> str:
+    """A fresh folder per mission, so one mission can never overwrite
+    or delete another's outputs."""
+    import uuid
+    return f"outputs/streamlit-mission/mission_{uuid.uuid4().hex[:8]}"
 
 
 _STAGES = ["Understanding your market", "Finding companies in this market",
@@ -110,7 +130,7 @@ _STAGES = ["Understanding your market", "Finding companies in this market",
            "Building your report"]
 
 
-def _run_with_progress(brief_text: str) -> dict:
+def _run_with_progress(brief_text: str) -> tuple[dict, str]:
     """Clean, visual progress: a card, a bar, and plain stage names.
     No tool names, no API names, no logs, no background logic — just
     what a founder would care to know: where the research is up to."""
@@ -136,10 +156,12 @@ def _run_with_progress(brief_text: str) -> dict:
             steps.markdown(row, unsafe_allow_html=True)
             stage.markdown(f"<p class='muted'>{html.escape(label)}</p>", unsafe_allow_html=True)
 
-        return run_mission(brief_text, "outputs/streamlit-mission",
-                           api_key=os.environ.get("CRUSTDATA_API_KEY"),
-                           sample=st.session_state.get("sample_mode", False),
-                           progress=_cb)
+        _out_dir = _new_mission_dir()
+        _result = run_mission(brief_text, _out_dir,
+                              api_key=os.environ.get("CRUSTDATA_API_KEY"),
+                              sample=st.session_state.get("sample_mode", False),
+                              progress=_cb)
+        return _result, _out_dir
 
 
 def _display_brief(result: dict, brief_text: str) -> str:
@@ -183,20 +205,45 @@ with st.sidebar:
         st.markdown('<p class="muted">No past searches yet.</p>', unsafe_allow_html=True)
     for e in entries[:20]:
         label = f"{e.get('product_name') or 'Market entry'} · {e.get('target_country', '')}"
-        if st.button(label, key=f"hist_{e['mission_id']}", use_container_width=True):
-            if _open_history_entry(e):
+        _row1, _row2 = st.columns([5, 1])
+        with _row1:
+            if st.button(label, key=f"hist_{e['mission_id']}", use_container_width=True):
+                st.session_state["menu_for"] = None
+                if _open_history_entry(e):
+                    st.rerun()
+                else:
+                    # Stale entry from the old shared-folder era (or a
+                    # folder deleted outside the app): drop it from the
+                    # list instead of leaving a permanently dead button.
+                    remove_entry("outputs/streamlit-mission", e["mission_id"])
+                    st.session_state["deleted_notice"] = (
+                        "That research can't be reopened — it was saved before "
+                        "each search got its own folder, and its files are gone. "
+                        "New searches are saved separately, so this won't happen again.")
+                    st.rerun()
+        with _row2:
+            if st.button("⋮", key=f"menu_{e['mission_id']}", use_container_width=True,
+                         help="More options"):
+                st.session_state["menu_for"] = (
+                    None if st.session_state["menu_for"] == e["mission_id"]
+                    else e["mission_id"])
                 st.rerun()
-            else:
-                st.error("That mission's output folder is gone.")
-    with st.expander("Manage past searches"):
-        st.markdown('<p class="muted">Delete permanently removes its report, files, CRM and history entry.</p>',
-                    unsafe_allow_html=True)
-        for e in entries[:20]:
-            if st.button(f"🗑  {e.get('product_name') or 'Market entry'}",
-                         key=f"del_{e['mission_id']}", use_container_width=True):
-                st.session_state["confirm_delete"] = e["mission_id"]
-                st.session_state["confirm_delete_out"] = e["out_dir"]
-                st.rerun()
+        # Three-dot menu for this chat only: Delete lives here, not in a
+        # separate Manage list and not as a permanent button per row.
+        if st.session_state["menu_for"] == e["mission_id"]:
+            _m1, _m2 = st.columns(2)
+            with _m1:
+                if st.button("🗑 Delete", key=f"del_{e['mission_id']}",
+                             use_container_width=True):
+                    st.session_state["confirm_delete"] = e["mission_id"]
+                    st.session_state["confirm_delete_out"] = e["out_dir"]
+                    st.session_state["menu_for"] = None
+                    st.rerun()
+            with _m2:
+                if st.button("Close", key=f"close_{e['mission_id']}",
+                             use_container_width=True):
+                    st.session_state["menu_for"] = None
+                    st.rerun()
     st.markdown("---")
     st.checkbox("Sample mode", key="sample_mode",
                 help="Labelled smoke test, no API key. Off for a live run.")
@@ -221,7 +268,13 @@ if st.session_state.get("confirm_delete"):
                         st.session_state["result"] = None
                         st.session_state["brief_text"] = ""
                 else:
-                    st.session_state["deleted_notice"] = "Could not delete that research — its folder was not found."
+                    # Folder already gone or overwritten by the old shared
+                    # folder: at least remove the dead list entry, and
+                    # never delete a folder that now belongs to another mission.
+                    remove_entry(_del_out, _del_id)
+                    st.session_state["deleted_notice"] = (
+                        "Removed from history — its files were already gone or "
+                        "belonged to another research, so nothing else was deleted.")
                 st.session_state["confirm_delete"] = None
                 st.rerun()
         with _c2:
@@ -249,9 +302,9 @@ if result:
     with _top2:
         if st.button("↻  Run again", use_container_width=True,
                      help="Re-run the same brief with fresh live data."):
-            _fresh = _run_with_progress(brief_text)
+            _fresh, _fresh_out = _run_with_progress(brief_text)
             st.session_state["result"] = _fresh
-            st.session_state["out"] = "outputs/streamlit-mission"
+            st.session_state["out"] = _fresh_out
             st.rerun()
     with _top3:
         if st.button("🗑  Delete this research", use_container_width=True):
@@ -377,8 +430,8 @@ if run:
     if not brief:
         st.error("Describe what you're selling and where you want to sell it, then run again.")
         st.stop()
-    result = _run_with_progress(brief)
+    result, _out_dir = _run_with_progress(brief)
     st.session_state["result"] = result
-    st.session_state["out"] = "outputs/streamlit-mission"
+    st.session_state["out"] = _out_dir
     st.session_state["brief_text"] = brief
     st.rerun()

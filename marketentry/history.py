@@ -14,8 +14,18 @@ from pathlib import Path
 
 
 def history_path_for(out_dir: str | Path) -> Path:
-    """History lives next to the mission outputs, not inside one mission."""
-    return Path(out_dir).resolve().parent / "history.json"
+    """One history file for all missions: <outputs>/history.json.
+
+    Old code used parent/history.json, which meant a per-mission folder
+    (outputs/streamlit-mission/<id>) recorded its history in a different
+    file than the UI loaded (outputs/history.json) — so past searches
+    silently vanished. Walk up to the 'outputs' ancestor instead, so
+    CLI, UI, and per-mission folders all share one history file."""
+    resolved = Path(out_dir).resolve()
+    for parent in [resolved, *resolved.parents]:
+        if parent.name == "outputs":
+            return parent / "history.json"
+    return resolved.parent / "history.json"
 
 
 def load_history(out_dir: str | Path) -> list[dict]:

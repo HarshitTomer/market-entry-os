@@ -68,6 +68,12 @@ def test_sample_mission_end_to_end(tmp_path):
     assert "SAMPLE" in (tmp_path / "Market_Entry_Report.html").read_text() or True
 
 
+def test_theme_is_single_neutral_accent():
+    theme = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text()
+    assert 'primaryColor = "#4f46e5"' in theme
+    assert "#ff4b4b" not in theme
+
+
 def test_progress_callback_uses_plain_labels_only(tmp_path):
     seen = []
     run_mission(BRIEF, tmp_path / "m2", sample=True,
