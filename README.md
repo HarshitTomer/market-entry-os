@@ -26,6 +26,18 @@ local CRM — with **no prompts in the middle and no contact to real prospects**
 6. `marketentry.db` — a real local SQLite CRM: companies, contacts, evidence,
    tool runs, and **unsent** outreach drafts (`status = unsent_draft`).
 
+## More professional chrome + loading states (v1.16, 31 Oct 2026)
+
+- **Chrome:** every view now has a top bar — MarketEntryOS wordmark
+  left, live/sample status and "Research only — no prospect
+  contacted" right, separated by one muted line. That one line is
+  what makes it read like a product instead of a demo script.
+- **Loading states:** the loading view now shows a large percentage
+  (not just a bar), a shimmer skeleton preview of the answer's
+  shape, and a "coming up" line (verdict · top 5 · market size ·
+  report), plus a plain explanation that nothing is shown until it
+  is complete, so you never see half-finished numbers.
+
 ## Loading that actually shows + a report that looks like a deliverable (v1.15, 31 Oct 2026)
 
 - **Loading, fixed properly:** the old progress card sat *below* the

@@ -85,6 +85,13 @@ st.markdown("""
     background: #a5b4fc; margin-right: 6px; animation: pulse-dot 1.2s infinite;}
   .loader-dot:nth-child(2) {animation-delay: 0.2s;}
   .loader-dot:nth-child(3) {animation-delay: 0.4s;}
+  @keyframes shimmer {0% {background-position: -200px 0;} 100% {background-position: 200px 0;}}
+  .skeleton {height: 14px; border-radius: 8px; margin: 10px 0;
+    background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+    background-size: 400px 100%; animation: shimmer 1.4s infinite;}
+  .topbar {display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0 12px 0; border-bottom: 1px solid #334155; margin-bottom: 16px;}
+  .wordmark {font-weight: 700; letter-spacing: -0.02em; color: #f1f5f9;}
   /* Bordered cards (verdict, progress, delete confirm): one muted line,
      consistent radius and padding, no double borders. */
   [data-testid="stVerticalBlockBorderWrapper"] {border-color: #334155 !important;
@@ -166,9 +173,11 @@ def _run_with_progress(brief_text: str) -> tuple[dict, str]:
     no logs, no background logic — just where the research is up to."""
     import time as _time
     _started = _time.time()
-    st.markdown("<br><br><h2 style='text-align:center;'>Researching your market</h2>",
+    st.markdown("<br><h2 style='text-align:center;'>Researching your market</h2>",
                 unsafe_allow_html=True)
-    st.markdown("<p class='muted' style='text-align:center;'>This usually takes about 90 seconds for a live run.</p>",
+    st.markdown("<p class='muted' style='text-align:center;'>This usually takes about 90 seconds for a live run. "
+                "Your verdict, top accounts and report are being built — nothing is shown until it is complete, "
+                "so you never see half-finished numbers.</p>",
                 unsafe_allow_html=True)
     with st.container(border=True):
         st.markdown('<span class="loader-dot"></span><span class="loader-dot"></span>'
@@ -178,11 +187,24 @@ def _run_with_progress(brief_text: str) -> tuple[dict, str]:
                     "the bar moves at every company, competitor and person checked, "
                     "so a pause is work happening, not a freeze.</p>", unsafe_allow_html=True)
         bar = st.progress(0)
+        pct = st.empty()
         steps = st.empty()
         stage = st.empty()
+        # Skeleton preview of what will arrive — world-class loading
+        # shows the shape of the answer, not just a bar.
+        st.markdown("<div class='skeleton' style='width:45%'></div>"
+                    "<div class='skeleton' style='width:80%'></div>"
+                    "<div class='skeleton' style='width:65%'></div>"
+                    "<div class='skeleton' style='width:55%'></div>",
+                    unsafe_allow_html=True)
+        st.markdown("<p class='muted' style='text-align:center;'>Coming up: verdict · top 5 accounts · market size · downloadable report</p>",
+                    unsafe_allow_html=True)
 
         def _cb(frac: float, label: str):
-            bar.progress(min(1.0, max(0.0, frac)))
+            _f = min(1.0, max(0.0, frac))
+            bar.progress(_f)
+            pct.markdown(f"<p style='text-align:center;font-size:1.4rem;font-weight:700;color:#f1f5f9;'>{int(_f * 100)}%</p>",
+                         unsafe_allow_html=True)
             # Strip the "(n of m)" detail for the step row; the bar shows progress.
             base = label.split(" (")[0]
             now = _STAGES.index(base) if base in _STAGES else len(_STAGES) - 1
@@ -328,6 +350,12 @@ if st.session_state.get("confirm_delete"):
 if st.session_state.get("deleted_notice"):
     st.success(st.session_state["deleted_notice"])
     st.session_state["deleted_notice"] = ""
+
+# Professional chrome on every view: wordmark left, live status right.
+_st_has_key = bool(os.environ.get("CRUSTDATA_API_KEY"))
+st.markdown(f"<div class='topbar'><span class='wordmark'>MarketEntryOS</span>"
+            f"<span class='muted'>{'● Live data' if _st_has_key else '○ Sample mode'} · "
+            f"Research only — no prospect contacted</span></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- loading view
 # The old bug: progress was rendered BELOW the search box and examples,
