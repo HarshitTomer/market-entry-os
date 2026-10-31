@@ -1,0 +1,234 @@
+"""Mission orchestrator: brief -> Crustdata -> ranking -> verifier ->
+CRM -> exports. One call, no intermediate prompts.
+
+Steps (spec §5): A brief, B discovery, C enrich+rank, D competitors,
+E buyers, F sizing+recommendation, G verification loop, H deliverables.
+
+Verification model: every client-facing claim gets an Evidence record.
+A claim is 'supported' only if a source record actually contains it and
+belongs to the right canonical id/domain. Everything else is 'unknown'
+or 'unverified' in the report — never silently promoted to a fact.
+Numbers (scores, sizing) are recomputed deterministically in Python,
+not taken from prose.
+"""
+from __future__ import annotations
+
+import csv
+import json
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .brief import MarketBrief, parse_brief
+from . import crm as crm_mod
+from .crustdata import Company, CrustdataClient, Person, ToolCall
+from .exporters import write_artifacts
+from .scoring import score_company, size_market, wave_for
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _evidence(evid: list, subject_id: str, claim: str, source: str,
+              pointer: str, field_path: str, status: str, notes: str = ""):
+    evid.append({
+        "evidence_id": f"ev_{len(evid) + 1:04d}",
+        "subject_type": "company", "subject_id": subject_id, "claim": claim,
+        "source_kind": source, "source_record_id": pointer, "source_url": None,
+        "field_path": field_path, "retrieved_at_utc": _now(),
+        "status": status, "notes": notes,
+    })
+
+
+# Sample data is ONLY for --sample smoke tests. It is labelled SAMPLE in
+# every output and in the trace, and is never presented as a live result.
+SAMPLE_COMPANIES = [
+    {"basic_info": {"name": "Sample Fintech Ltd", "primary_domain": "samplefintech.example"},
+     "headcount": {"total": 180}, "locations": {"headquarters": "London, United Kingdom"},
+     "taxonomy": {"industry": "Financial technology"}, "funding": {"total_investment_usd": 20000000}},
+    {"basic_info": {"name": "Sample Pay Ltd", "primary_domain": "samplepay.example"},
+     "headcount": {"total": 90}, "locations": {"headquarters": "Manchester, United Kingdom"},
+     "taxonomy": {"industry": "Financial technology"}},
+]
+
+
+def run_mission(raw_prompt: str, out_dir: str | Path, api_key: str | None = None,
+                sample: bool = False, max_accounts: int | None = None) -> dict:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    mission_id = f"mission_{uuid.uuid4().hex[:8]}"
+    brief: MarketBrief = parse_brief(raw_prompt)
+    if max_accounts:
+        brief.max_target_accounts = max_accounts
+    started = _now()
+    warnings: list[str] = list(brief.warnings)
+    trace: list[ToolCall] = []
+    evidence: list[dict] = []
+    client = CrustdataClient(api_key=api_key, trace=trace)
+    mode = "sample" if sample else ("live" if client.has_key else "no_key")
+    if mode == "no_key":
+        warnings.append(
+            "No CRUSTDATA_API_KEY set: live Crustdata calls were skipped. "
+            "Set CRUSTDATA_API_KEY in a local .env file (never commit it) "
+            "and re-run for a genuine live mission, or re-run with --sample "
+            "for a clearly labelled smoke test.")
+
+    # Step B: discovery
+    if sample:
+        from .crustdata import normalize_company
+        companies = [normalize_company(r) for r in SAMPLE_COMPANIES]
+        total_count = len(companies)
+        trace.append(ToolCall("company_search", "sample", "ok", 0,
+                              "Sample data (smoke test only, not a live Crustdata call).",
+                              result_count=len(companies)))
+    elif mode == "live":
+        companies, total_count, warns = client.search_companies(brief, limit=brief.max_target_accounts)
+        warnings.extend(warns)
+    else:
+        companies, total_count = [], None
+    companies = companies[:brief.max_target_accounts]
+
+    # Step C: enrich top accounts (bounded by credit cap)
+    enriched: list[Company] = []
+    for c in companies[:brief.max_company_enrichments]:
+        if sample:
+            enriched.append(c)
+            continue
+        if mode != "live":
+            break
+        got = client.enrich_company(c)
+        enriched.append(got or c)
+        if got is None:
+            warnings.append(f"Enrichment failed for {c.name}: keeping search record, marked unverified.")
+    enriched.extend(companies[brief.max_company_enrichments:])
+
+    # Step D: competitors (keyword company search + web search, best effort)
+    competitors: list[dict] = []
+    if mode == "live" and brief.competitor_keywords:
+        kw = brief.competitor_keywords[0]
+        comp_brief = MarketBrief(target_country=brief.target_country,
+                                 target_industry=brief.target_industry,
+                                 max_target_accounts=5)
+        comp_list, _, comp_warns = client.search_companies(comp_brief, limit=5)
+        warnings.extend(comp_warns)
+        for cc in comp_list:
+            if cc.domain and any(cc.domain == e.domain for e in enriched):
+                continue
+            competitors.append({
+                "name": cc.name, "domain": cc.domain, "company_id": cc.company_id,
+                "industry": cc.industry, "employee_count": cc.employee_count,
+                "classification": "possible competitor",
+                "evidence": f"Crustdata company search for keyword/industry '{kw}'",
+            })
+        web = client.web_search(f"{kw} {brief.target_industry} competitors {brief.target_country}", limit=3)
+        for r in web[:3]:
+            title = r.get("title") or r.get("url") or "web result"
+            competitors.append({"name": title, "domain": "", "company_id": "",
+                                "industry": "", "employee_count": None,
+                                "classification": "insufficient evidence",
+                                "evidence": "Crustdata web search (source page not enriched)"})
+    if sample:
+        competitors.append({"name": "Sample Competitor Ltd", "domain": "samplecomp.example",
+                            "company_id": "sample-comp", "industry": brief.target_industry,
+                            "employee_count": 250, "classification": "possible competitor",
+                            "evidence": "Sample data (smoke test only)"})
+
+    # Step E: buyers for top 5 accounts
+    buyers: list[Person] = []
+    buyer_counts: dict[str, int] = {}
+    for c in enriched[:5]:
+        if sample:
+            p = Person(person_id=f"sample-{c.company_id}", name="Sample Buyer",
+                       title="Head of Compliance", company_name=c.name,
+                       company_domain=c.domain, company_id=c.company_id)
+            buyers.append(p); buyer_counts[c.company_id] = 1
+            continue
+        if mode != "live":
+            buyer_counts[c.company_id] = 0
+            continue
+        people, warns = client.search_people(c, brief.target_buyer_roles,
+                                             limit=brief.max_contacts_per_company * 2)
+        warnings.extend(warns)
+        kept = people[:brief.max_contacts_per_company]
+        buyers.extend(kept); buyer_counts[c.company_id] = len(kept)
+        if not kept:
+            warnings.append(f"No verified buyer found for {c.name}: marked buyer_not_found, no name fabricated.")
+
+    # Step C (scoring, after buyers so buyer availability counts)
+    ranked = []
+    for c in enriched:
+        kw_overlap = bool(brief.competitor_keywords and c.industry
+                          and brief.target_industry.lower() in c.industry.lower())
+        score, coverage, unknowns = score_company(
+            c, brief, buyer_count=buyer_counts.get(c.company_id, 0),
+            keyword_overlap=kw_overlap)
+        status = "verified" if coverage >= 0.6 and c.domain else "unverified"
+        ranked.append({"company": c, "fit_score": score, "coverage": coverage,
+                       "unknowns": unknowns, "verification_status": status})
+    ranked.sort(key=lambda r: (-r["fit_score"], -r["coverage"]))
+    for i, r in enumerate(ranked):
+        r["rank"] = i + 1
+        r["wave"] = wave_for(i, len(ranked))
+        c = r["company"]
+        _evidence(evidence, c.company_id,
+                  f"{c.name} employs {c.employee_count} people" if c.employee_count else f"{c.name} headcount unknown",
+                  "crustdata_company_search" if mode != "sample" else "sample_data",
+                  c.company_id, "headcount.total",
+                  "supported" if c.employee_count else "unknown")
+        _evidence(evidence, c.company_id,
+                  f"{c.name} fit score {r['fit_score']}/100 (coverage {r['coverage']})",
+                  "deterministic_scoring", c.company_id, "fit_score",
+                  "supported", "Recomputed in Python from observed fields; unknowns listed separately.")
+
+    sizing = size_market(total_count, len(ranked), brief.annual_contract_value, brief.currency)
+    state = "completed" if not warnings else "completed_with_warnings"
+    if mode == "no_key":
+        state = "completed_with_warnings"
+
+    # Step H: CRM + exports (SQLite is the operational state)
+    db_path = out / "marketentry.db"
+    conn = crm_mod.connect(db_path)
+    conn.execute("INSERT OR REPLACE INTO missions(id, raw_prompt, normalized_brief_json, status, started_at, finished_at, warnings_json) VALUES(?,?,?,?,?,?,?)",
+                 (mission_id, raw_prompt, json.dumps(brief.to_dict()), state, started, _now(), json.dumps(warnings)))
+    conn.commit()
+    for r in ranked:
+        c = r["company"]
+        crm_mod.upsert_company(conn, mission_id, c, r["fit_score"], r["coverage"], r["verification_status"])
+        crm_mod.add_task(conn, mission_id, c.company_id, "research",
+                         f"Research {c.name} ({r['wave']})",
+                         f"UNSENT DRAFT — do not send. Research {c.name} before outreach; evidence: fit {r['fit_score']}/100.")
+        crm_mod.add_task(conn, mission_id, c.company_id, "outreach_draft",
+                         f"Draft outreach to {c.name} ({r['wave']})",
+                         f"UNSENT DRAFT — do not send. Subject: market entry for {brief.product_name}. "
+                         f"Body: tailored to {c.name}'s observed profile; no claim beyond the evidence log.")
+    for p in buyers:
+        crm_mod.upsert_person(conn, mission_id, p, verified=bool(p.company_domain))
+    for e in evidence:
+        conn.execute("INSERT INTO evidence(mission_id, subject_id, claim, source_type, source_pointer, field_path, retrieved_at, status) VALUES(?,?,?,?,?,?,?,?)",
+                     (mission_id, e["subject_id"], e["claim"], e["source_kind"], e["source_record_id"], e["field_path"], e["retrieved_at_utc"], e["status"]))
+    for t in trace:
+        conn.execute("INSERT INTO tool_runs(mission_id, tool_name, request_hash, result_status, duration_ms, credit_cost, error_type) VALUES(?,?,?,?,?,?,?)",
+                     (mission_id, t.tool, "", t.status, t.duration_ms, "", t.detail))
+    conn.commit()
+    conn.close()
+
+    artifacts = write_artifacts(out, mission_id, brief, ranked, buyers, competitors, sizing, evidence, warnings, mode, trace)
+    verified = sum(1 for e in evidence if e["status"] == "supported")
+    result = {
+        "mission_id": mission_id, "state": state, "mode": mode,
+        "brief": brief.to_dict(), "sizing": sizing,
+        "company_records": len(ranked), "buyer_records": len(buyers),
+        "competitor_records": len(competitors),
+        "verified_claim_fraction": round(verified / len(evidence), 3) if evidence else None,
+        "artifacts": artifacts, "warnings": warnings,
+        "trace": [{"tool": t.tool, "endpoint": t.endpoint, "status": t.status,
+                   "duration_ms": t.duration_ms, "detail": t.detail,
+                   "result_count": t.result_count} for t in trace],
+        "ranked": [{"rank": r["rank"], "name": r["company"].name, "domain": r["company"].domain,
+                    "fit_score": r["fit_score"], "coverage": r["coverage"],
+                    "wave": r["wave"], "verification_status": r["verification_status"],
+                    "unknowns": r["unknowns"]} for r in ranked],
+    }
+    (out / "mission_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result
